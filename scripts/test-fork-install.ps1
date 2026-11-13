@@ -8,6 +8,7 @@ $oldSession = $env:HC_SESSION
 $oldState = $env:XDG_STATE_HOME
 $oldConfig = $env:XDG_CONFIG_HOME
 $oldSocket = $env:HC_SOCKET
+$oldMarker = $env:HC_INSTALLER_ENV_PROBE
 $started = $false
 try {
     $assets = Join-Path $root 'assets'
@@ -57,6 +58,23 @@ try {
     if ($LASTEXITCODE -or $live -ne 'live') { throw 'updating did not preserve the terminal' }
     if ((Get-FileHash $old).Hash -ne $before) { throw 'update did not install the verified binary' }
     if ((Get-FileHash $conpty).Hash -ne $conptyHash) { throw 'update did not install the verified ConPTY' }
+
+    # An update with no running core must not start one with the installer's agent environment.
+    & $old server stop | Out-Null
+    if ($LASTEXITCODE) { throw 'isolated core did not stop' }
+    $env:HC_INSTALLER_ENV_PROBE = 'agent-only'
+    [IO.File]::AppendAllText($conpty, 'test marker')
+    & $installer
+    if ($env:HC_INSTALLER_ENV_PROBE -ne 'agent-only') { throw 'installer changed caller environment' }
+    $probe = Join-Path $root 'environment.txt'
+    $script = Join-Path $root 'environment.ps1'
+    [IO.File]::WriteAllText($script, "[IO.File]::WriteAllText('$probe', [string]`$env:HC_INSTALLER_ENV_PROBE)")
+    & $old --json run --bg -- powershell.exe -NoProfile -File $script | Out-Null
+    if ($LASTEXITCODE) { throw 'environment probe did not start' }
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while (-not (Test-Path $probe) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 50 }
+    if (-not (Test-Path $probe)) { throw 'environment probe did not finish' }
+    if ([IO.File]::ReadAllText($probe) -ne '') { throw 'core inherited installer agent environment' }
 } finally {
     $env:HC_INSTALL_DIR = $oldInstall
     if ($started) { & $old server stop | Out-Null }
@@ -64,6 +82,7 @@ try {
     $env:XDG_STATE_HOME = $oldState
     $env:XDG_CONFIG_HOME = $oldConfig
     $env:HC_SOCKET = $oldSocket
+    $env:HC_INSTALLER_ENV_PROBE = $oldMarker
     $env:HC_FORK_RELEASE_BASE = $oldBase
     Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
 }
