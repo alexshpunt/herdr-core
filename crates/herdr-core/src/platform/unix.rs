@@ -614,6 +614,79 @@ pub fn boot_id() -> io::Result<Option<String>> {
     }
 }
 
+/// A live OS reference to one process instance, retained until its report ends.
+pub struct ProcessIdentity {
+    pid: i32,
+    fd: std::os::fd::OwnedFd,
+    #[cfg(target_os = "macos")]
+    exited: std::sync::Mutex<bool>,
+}
+
+impl ProcessIdentity {
+    /// Observe a process without treating a reused numeric PID as the same instance.
+    pub fn open(pid: i32) -> Option<Self> {
+        if pid <= 0 {
+            return None;
+        }
+        #[cfg(target_os = "linux")]
+        let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as i32 };
+        #[cfg(target_os = "macos")]
+        let raw = unsafe { libc::kqueue() };
+        if raw < 0 {
+            return None;
+        }
+        let fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) };
+        #[cfg(target_os = "macos")]
+        {
+            if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+                return None;
+            }
+            let change = libc::kevent {
+                ident: pid as _,
+                filter: libc::EVFILT_PROC,
+                flags: libc::EV_ADD | libc::EV_ENABLE | libc::EV_CLEAR,
+                fflags: libc::NOTE_EXIT,
+                data: 0,
+                udata: std::ptr::null_mut(),
+            };
+            if unsafe { libc::kevent(fd.as_raw_fd(), &change, 1, std::ptr::null_mut(), 0, std::ptr::null()) } < 0 {
+                return None;
+            }
+        }
+        let identity = Self {
+            pid,
+            fd,
+            #[cfg(target_os = "macos")]
+            exited: std::sync::Mutex::new(false),
+        };
+        identity.is_alive().then_some(identity)
+    }
+
+    /// A failed or unavailable observation is treated as not alive.
+    pub fn is_alive(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            let mut poll = libc::pollfd { fd: self.fd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+            unsafe { libc::poll(&mut poll, 1, 0) == 0 }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let Ok(mut exited) = self.exited.lock() else { return false };
+            if *exited {
+                return false;
+            }
+            let mut event = std::mem::MaybeUninit::<libc::kevent>::uninit();
+            let timeout = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+            let count =
+                unsafe { libc::kevent(self.fd.as_raw_fd(), std::ptr::null(), 0, event.as_mut_ptr(), 1, &timeout) };
+            if count != 0 {
+                *exited = true;
+            }
+            !*exited
+        }
+    }
+}
+
 // --- Terminals -------------------------------------------------------------
 
 /// A program on its own terminal.
@@ -747,6 +820,22 @@ impl Pty {
         unsafe { libc::tcgetpgrp(self.master.as_raw_fd()) }
     }
 
+    /// Whether the observed process instance belongs to this terminal's foreground group.
+    pub fn process_in_front(&self, pid: i32, identity: &ProcessIdentity) -> Option<bool> {
+        if pid != identity.pid || !identity.is_alive() {
+            return Some(false);
+        }
+        let foreground = self.foreground();
+        let group = unsafe { libc::getpgid(pid) };
+        if !identity.is_alive() {
+            return Some(false);
+        }
+        if foreground <= 0 || group <= 0 {
+            return None;
+        }
+        Some(group == foreground)
+    }
+
     /// The program's group, plus whatever group is in the foreground.
     pub fn signal(&self, pid: u32, signal: i32) {
         unsafe {
@@ -772,6 +861,50 @@ pub fn wait(child: &mut Process) -> io::Result<(Option<i32>, Option<i32>)> {
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => return Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod process_identity_tests {
+    use super::*;
+
+    #[test]
+    fn a_shell_wrapper_and_its_child_share_the_foreground_group() {
+        let args = vec!["/bin/sh".to_owned(), "-c".to_owned(), "/bin/sleep 30 & echo $!; wait".to_owned()];
+        let (pty, mut shell) = spawn_pty(&args, &Default::default(), "/", 80, 24).unwrap();
+        let mut output = [0u8; 64];
+        let size = pty.reader().unwrap().read(&mut output).unwrap();
+        let child_pid: i32 = std::str::from_utf8(&output[..size]).unwrap().trim().parse().unwrap();
+        let identity = ProcessIdentity::open(child_pid).expect("observe shell child");
+        let matches = pty.process_in_front(child_pid, &identity);
+        pty.signal(shell.id(), libc::SIGKILL);
+        shell.wait().unwrap();
+        assert_ne!(child_pid, shell.id() as i32);
+        assert_eq!(matches, Some(true));
+    }
+
+    #[test]
+    fn tracks_a_real_process_lifetime_and_its_foreground_terminal() {
+        let args = vec!["/bin/sh".to_owned(), "-c".to_owned(), "exec sleep 30".to_owned()];
+        let (pty, mut child) = spawn_pty(&args, &Default::default(), "/", 80, 24).unwrap();
+        let pid = child.id() as i32;
+        let identity = ProcessIdentity::open(pid).expect("observe live process");
+        let mut outsider = Command::new("sleep").arg("30").spawn().unwrap();
+        let outside_id = ProcessIdentity::open(outsider.id() as i32).expect("observe outsider");
+        let in_front = pty.process_in_front(pid, &identity);
+        let outside = pty.process_in_front(outsider.id() as i32, &outside_id);
+        let wrong_pid = pty.process_in_front(pid, &outside_id);
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let dead = identity.is_alive();
+        let ended = pty.process_in_front(pid, &identity);
+        outsider.kill().unwrap();
+        outsider.wait().unwrap();
+        assert_eq!(in_front, Some(true));
+        assert_eq!(outside, Some(false));
+        assert_eq!(wrong_pid, Some(false));
+        assert!(!dead);
+        assert_eq!(ended, Some(false));
     }
 }
 

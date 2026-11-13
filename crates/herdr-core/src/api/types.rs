@@ -317,6 +317,26 @@ pub struct TerminalParams {
 }
 
 #[derive(clap::Args, Serialize, Deserialize, JsonSchema)]
+pub struct ProcessParams {
+    /// The terminal: `t7`, a name, or `machine/t7`.
+    pub terminal: String,
+    /// The process ID as observed on the terminal's machine.
+    #[arg(long)]
+    pub pid: i32,
+    /// A token previously returned for this process instance.
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct ProcessResult {
+    /// An opaque handle for the observed live process, only on registration.
+    pub token: Option<String>,
+    /// Whether the identified process is in front; null means it cannot be observed.
+    pub in_front: Option<bool>,
+}
+
+#[derive(clap::Args, Serialize, Deserialize, JsonSchema)]
 pub struct ListParams {
     /// Include finished terminals.
     #[arg(long)]

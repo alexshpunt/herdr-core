@@ -30,6 +30,8 @@ struct Term {
     /// Since when its output could drain; None while its reader waits for a
     /// core that fell behind. An exit waits for its output from then on.
     drains_since: Option<Instant>,
+    /// Bounded process handles scoped to this terminal, keyed by PID.
+    processes: HashMap<i32, (String, platform::ProcessIdentity)>,
 }
 
 /// The connected core. Frames go out through its own writer thread: a core
@@ -265,6 +267,31 @@ impl Holder {
                     let pgid = st.terms.get(&id).filter(|t| t.exit.is_none()).map_or(-1, |t| t.pty.foreground());
                     self.to_core(&mut st, &proto::json_frame(proto::FOREGROUND_IS, id, &proto::Foreground { pgid }));
                 }
+                proto::PROCESS => {
+                    let req: proto::ProcessRequest = proto::parse(&payload)?;
+                    let mut st = self.lock();
+                    let mut reply = proto::ProcessReply { request: req.request, token: None, in_front: None };
+                    if let Some(t) = st.terms.get_mut(&id).filter(|t| t.exit.is_none()) {
+                        t.processes.retain(|_, (_, identity)| identity.is_alive());
+                        if let Some(token) = req.token {
+                            if let Some((_, identity)) = t.processes.get(&req.pid).filter(|(known, _)| *known == token)
+                            {
+                                reply.in_front = t.pty.process_in_front(req.pid, identity);
+                            }
+                        } else if req.pid > 0 {
+                            if let Some((known, _)) = t.processes.get(&req.pid) {
+                                reply.token = Some(known.clone());
+                            } else if t.processes.len() < 64
+                                && let Some(identity) = platform::ProcessIdentity::open(req.pid)
+                            {
+                                let token = platform::random_hex();
+                                t.processes.insert(req.pid, (token.clone(), identity));
+                                reply.token = Some(token);
+                            }
+                        }
+                    }
+                    self.to_core(&mut st, &proto::json_frame(proto::PROCESS_IS, id, &reply));
+                }
                 proto::RELEASE => {
                     if let Some(t) = self.lock().terms.remove(&id)
                         && !t.reader_done
@@ -357,6 +384,7 @@ impl Holder {
                         exit: None,
                         reader_done: false,
                         drains_since: Some(Instant::now()),
+                        processes: HashMap::new(),
                     },
                 );
                 let (holder, waiter) = (self.clone(), self.clone());
@@ -429,15 +457,23 @@ impl Holder {
         }
         if let Some(t) = st.terms.get_mut(&id) {
             t.exit = Some(exit);
+            t.processes.clear();
             self.to_core(&mut st, &proto::json_frame(proto::EXITED, id, &exit));
         }
     }
 
     /// Starts a core when the last one crashed and none came back in time.
     fn supervise(&self) {
+        let mut process_sweep = Instant::now();
         loop {
             std::thread::sleep(self.grace.min(Duration::from_millis(100)));
             let mut st = self.lock();
+            if process_sweep.elapsed() >= Duration::from_secs(1) {
+                for term in st.terms.values_mut() {
+                    term.processes.retain(|_, (_, identity)| identity.is_alive());
+                }
+                process_sweep = Instant::now();
+            }
             if st.core.is_some() || st.core_left.elapsed() < self.grace {
                 continue;
             }

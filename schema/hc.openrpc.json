@@ -684,6 +684,25 @@
         ],
         "type": "object"
       },
+      "ProcessResult": {
+        "properties": {
+          "in_front": {
+            "description": "Whether the identified process is in front; null means it cannot be observed.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "token": {
+            "description": "An opaque handle for the observed live process, only on registration.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "PutResult": {
         "properties": {
           "bytes": {
@@ -2078,6 +2097,73 @@
         "name": "result",
         "schema": {
           "$ref": "#/components/schemas/Terminal"
+        }
+      }
+    },
+    {
+      "description": "Register a live process instance or check whether a registered process is in a terminal's foreground. A null result means observation was unavailable.",
+      "errors": [
+        {
+          "code": -32000,
+          "data": {
+            "kind": "not_found"
+          },
+          "message": "not_found"
+        },
+        {
+          "code": -32000,
+          "data": {
+            "kind": "machine_unknown"
+          },
+          "message": "machine_unknown"
+        },
+        {
+          "code": -32602,
+          "data": {
+            "kind": "invalid_params"
+          },
+          "message": "invalid_params"
+        }
+      ],
+      "name": "terminal.process",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "description": "The process ID as observed on the terminal's machine.",
+          "name": "pid",
+          "required": true,
+          "schema": {
+            "description": "The process ID as observed on the terminal's machine.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The terminal: `t7`, a name, or `machine/t7`.",
+          "name": "terminal",
+          "required": true,
+          "schema": {
+            "description": "The terminal: `t7`, a name, or `machine/t7`.",
+            "type": "string"
+          }
+        },
+        {
+          "description": "A token previously returned for this process instance.",
+          "name": "token",
+          "required": false,
+          "schema": {
+            "description": "A token previously returned for this process instance.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/ProcessResult"
         }
       }
     },

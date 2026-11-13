@@ -86,6 +86,9 @@ methods! { Ctx<'_>;
     "terminal.get" => terminal_get, TerminalParams => Public,
         "One terminal's facts, live or finished.",
         errors ["not_found", "machine_unknown"];
+    "terminal.process" => terminal_process, ProcessParams => ProcessResult,
+        "Register a live process instance or check whether a registered process is in a terminal's foreground. A null result means observation was unavailable.",
+        errors ["not_found", "machine_unknown", "invalid_params"];
     "terminal.kill" => terminal_kill, TerminalParams => Public,
         "End the program: hangup, then terminate, then kill. Returns the observed result.",
         errors ["not_found", "machine_unknown"];
@@ -306,6 +309,18 @@ async fn terminal_get(core: Ctx<'_>, p: TerminalParams) -> Result<Public, RpcErr
     let result = record(core, id).map(Public);
     core.flush_saved().await?;
     result
+}
+
+async fn terminal_process(core: Ctx<'_>, p: ProcessParams) -> Result<ProcessResult, RpcError> {
+    if p.pid <= 0 {
+        return Err(RpcError::invalid_params("pid must be positive"));
+    }
+    let id = resolve(core, &p.terminal)?;
+    let response = core.observe_process(id, p.pid, p.token).await;
+    Ok(response.map_or(ProcessResult { token: None, in_front: None }, |r| ProcessResult {
+        token: r.token,
+        in_front: r.in_front,
+    }))
 }
 
 async fn terminal_kill(core: Ctx<'_>, p: TerminalParams) -> Result<Public, RpcError> {

@@ -1,8 +1,8 @@
 //! `hc`: one API call per command. Tables for people, JSON when piped or `--json`.
 
 use crate::api::{
-    AttachParams, ExecParams, InterruptParams, KeysParams, LabelParams, ListParams, PutParams, ReadParams, RunParams,
-    SendParams, SubscribeParams, TerminalParams, WaitParams,
+    AttachParams, ExecParams, InterruptParams, KeysParams, LabelParams, ListParams, ProcessParams, PutParams,
+    ReadParams, RunParams, SendParams, SubscribeParams, TerminalParams, WaitParams,
 };
 use crate::client;
 use crate::paths::Paths;
@@ -43,6 +43,8 @@ enum Cmd {
     Ls(ListParams),
     /// Show one terminal.
     Get(TerminalParams),
+    /// Register or observe a terminal process instance.
+    Process(ProcessParams),
     /// End a terminal's program (hangup, then escalate).
     Kill(TerminalParams),
     /// Remove a finished terminal.
@@ -432,6 +434,11 @@ fn run(cmd: Option<Cmd>, json: bool, asked: bool) -> Result<Option<Out>, RpcErro
             let human = describe(&r);
             Out { json: r, human }
         }
+        Cmd::Process(p) => {
+            let r = call("terminal.process", to(&p))?;
+            let human = r.to_string();
+            Out { json: r, human }
+        }
         Cmd::Kill(mut p) => {
             (p.terminal, p.caller) = (pick(p.terminal)?, Some(caller()));
             let r = call("terminal.kill", to(&p))?;
@@ -723,6 +730,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("run", "terminal.run"),
     ("ls", "terminal.list"),
     ("get", "terminal.get"),
+    ("process", "terminal.process"),
     ("kill", "terminal.kill"),
     ("rm", "terminal.rm"),
     ("label", "terminal.label"),

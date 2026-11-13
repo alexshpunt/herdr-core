@@ -40,6 +40,23 @@ fn recording_ssh(local: &Session, remote: &Session) -> (String, std::path::PathB
 }
 
 #[test]
+fn process_observation_follows_the_terminal_to_its_machine() {
+    let (remote, local) = with_rohan();
+    let terminal = run(&remote, &["sh", "-c", "exec sleep 300"]);
+    let pid = get(&remote, &terminal)["pid"].as_i64().unwrap();
+    let mut remote_conn = remote.connect();
+    let registration = remote_conn.call(1, "terminal.process", json!({"terminal": terminal, "pid": pid}));
+    let token = registration["result"]["token"].as_str().expect("process token");
+    let result = local.connect().call(
+        1,
+        "terminal.process",
+        json!({
+            "terminal": format!("rohan/{terminal}"), "pid": pid, "token": token,
+        }),
+    );
+    assert_eq!(result["result"]["in_front"], true, "{result}");
+}
+#[test]
 fn remote_sends_outlive_a_draft_but_not_a_lost_or_frozen_line() {
     use std::time::{Duration, Instant};
     let mut rohan = Session::new();

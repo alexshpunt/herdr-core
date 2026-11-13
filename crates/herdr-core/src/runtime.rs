@@ -59,6 +59,7 @@ pub struct State {
     pub queues: HashMap<u32, Arc<tokio::sync::Mutex<()>>>,
     pub sends: HashMap<u32, Arc<tokio::sync::Mutex<()>>>,
     pub foreground: HashMap<u32, Vec<oneshot::Sender<i32>>>,
+    pub process_requests: HashMap<String, oneshot::Sender<proto::ProcessReply>>,
     /// Waits matching output: they get every byte viewers get.
     pub output_watch: HashMap<u32, Vec<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>,
     /// The turn of each caller's last send to a terminal, until a bare wait reports it.
@@ -166,6 +167,34 @@ fn finish_reason(killed: bool, stopping: bool, host_shutdown: bool) -> &'static 
 }
 
 impl Core {
+    /// Ask the owning holder; a draining older holder may not support the request.
+    pub(crate) async fn observe_process(
+        &self,
+        id: u32,
+        pid: i32,
+        token: Option<String>,
+    ) -> Option<proto::ProcessReply> {
+        let request = platform::random_hex();
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut st = self.lock();
+            st.process_requests.retain(|_, tx| !tx.is_closed());
+            if st.process_requests.len() >= 256 {
+                return None;
+            }
+            let link = st.link(id)?;
+            link.send(&proto::json_frame(
+                proto::PROCESS,
+                id,
+                &proto::ProcessRequest { request: request.clone(), pid, token },
+            ));
+            st.process_requests.insert(request.clone(), tx);
+        }
+        let reply = tokio::time::timeout(Duration::from_secs(1), rx).await.ok().and_then(Result::ok);
+        self.lock().process_requests.remove(&request);
+        reply
+    }
+
     pub fn start(paths: Paths, info: CoreInfo) -> io::Result<Arc<Core>> {
         let reg: Registry = read_state(&paths.state.join("terminals.json"))?;
         let docs_path = paths.state.join("docs.json");
@@ -683,6 +712,13 @@ impl Core {
                     let pgid = proto::parse::<proto::Foreground>(&payload).map_or(-1, |f| f.pgid);
                     for tx in st.foreground.remove(&id).unwrap_or_default() {
                         let _ = tx.send(pgid);
+                    }
+                }
+                proto::PROCESS_IS => {
+                    if let Ok(reply) = proto::parse::<proto::ProcessReply>(&payload)
+                        && let Some(tx) = st.process_requests.remove(&reply.request)
+                    {
+                        let _ = tx.send(reply);
                     }
                 }
                 proto::BYE => {

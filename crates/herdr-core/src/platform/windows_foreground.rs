@@ -23,31 +23,31 @@ pub(super) fn in_front(job: HANDLE, root: u32) -> u32 {
     newest_child(root, &unsafe { job_processes(job) }).unwrap_or(root)
 }
 
-/// A known shell root's newest child, console hosts aside (Windows starts
-/// them for console programs; they are never what a person is using).
+fn is_shell(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    matches!(
+        name.strip_suffix(".exe").unwrap_or(&name),
+        "zsh"
+            | "bash"
+            | "fish"
+            | "sh"
+            | "dash"
+            | "nu"
+            | "pwsh"
+            | "powershell"
+            | "cmd"
+            | "elvish"
+            | "xonsh"
+            | "tcsh"
+            | "csh"
+            | "ksh"
+            | "ion"
+    )
+}
+
+/// A known shell root's newest child, console hosts aside.
 fn newest_child(root: u32, procs: &[Proc]) -> Option<u32> {
-    let shell = |name: &str| {
-        let name = name.to_ascii_lowercase();
-        matches!(
-            name.strip_suffix(".exe").unwrap_or(&name),
-            "zsh"
-                | "bash"
-                | "fish"
-                | "sh"
-                | "dash"
-                | "nu"
-                | "pwsh"
-                | "powershell"
-                | "cmd"
-                | "elvish"
-                | "xonsh"
-                | "tcsh"
-                | "csh"
-                | "ksh"
-                | "ion"
-        )
-    };
-    if !procs.iter().any(|p| p.pid == root && shell(&p.name)) {
+    if !procs.iter().any(|p| p.pid == root && is_shell(&p.name)) {
         return None;
     }
     let host = |name: &str| ["conhost.exe", "OpenConsole.exe"].iter().any(|h| name.eq_ignore_ascii_case(h));
@@ -58,28 +58,61 @@ fn newest_child(root: u32, procs: &[Proc]) -> Option<u32> {
         .map(|p| p.pid)
 }
 
-/// The job's live processes: a few per terminal, so read one by one (a
-/// whole-system snapshot would cost more, twice a second per terminal).
-unsafe fn job_processes(job: HANDLE) -> Vec<Proc> {
+/// Whether an identified reporter is reached by following foreground shell jobs.
+fn reporter_in_front(root: u32, reporter: u32, started: u64, procs: &[Proc]) -> bool {
+    let Some(reporter_proc) = procs.iter().find(|p| p.pid == reporter && p.started == started) else { return false };
+    let mut current = root;
+    for _ in 0..procs.len() {
+        let Some(parent) = procs.iter().find(|p| p.pid == current) else { return false };
+        let Some(child) = newest_child(current, procs).and_then(|id| procs.iter().find(|p| p.pid == id)) else {
+            return current == reporter_proc.pid;
+        };
+        if child.started < parent.started {
+            return false;
+        }
+        current = child.pid;
+    }
+    false
+}
+
+/// Checks the reported process against a complete observation of the job.
+pub(super) fn reporter(job: HANDLE, root: u32, pid: u32) -> Option<bool> {
+    let (ids, complete) = job_pids(job);
+    if !complete {
+        return None;
+    }
+    let processes: Option<Vec<Proc>> = ids.into_iter().map(|id| unsafe { about(id) }).collect();
+    let processes = processes?;
+    let Some(process) = processes.iter().find(|p| p.pid == pid) else { return Some(false) };
+    Some(reporter_in_front(root, pid, process.started, &processes))
+}
+
+/// Returns the available process IDs and whether the complete job fit.
+fn job_pids(job: HANDLE) -> (Vec<u32>, bool) {
     #[repr(C)]
     struct Ids {
         assigned: u32,
         listed: u32,
         ids: [usize; 64],
     }
-    unsafe {
-        let mut list: Ids = zeroed();
-        // More than fit fails with the list filled as far as it goes: enough.
+    let mut list: Ids = unsafe { zeroed() };
+    let ok = unsafe {
         QueryInformationJobObject(
             job,
             JobObjectBasicProcessIdList,
             (&raw mut list).cast(),
             size_of::<Ids>() as u32,
             null_mut(),
-        );
-        let n = (list.listed as usize).min(list.ids.len());
-        list.ids[..n].iter().filter_map(|&pid| about(pid as u32)).collect()
-    }
+        )
+    };
+    let n = (list.listed as usize).min(list.ids.len());
+    let complete = ok != 0 && list.assigned == list.listed && list.listed as usize <= list.ids.len();
+    (list.ids[..n].iter().map(|&id| id as u32).collect(), complete)
+}
+
+/// Existing foreground observation keeps partial results when the job is large.
+unsafe fn job_processes(job: HANDLE) -> Vec<Proc> {
+    job_pids(job).0.into_iter().filter_map(|pid| unsafe { about(pid) }).collect()
 }
 
 unsafe fn about(pid: u32) -> Option<Proc> {
@@ -133,6 +166,89 @@ mod tests {
         assert_eq!(newest_child(10, &procs), Some(12));
     }
 
+    #[test]
+    fn a_real_process_behind_cmd_is_observed_until_it_exits() {
+        use super::super::windows::{ProcessIdentity, spawn_pty, wait};
+        use std::time::{Duration, Instant};
+        let root = std::env::temp_dir().join(format!("hc-provenance-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let script = root.join("child.ps1");
+        let pid_file = root.join("pid.txt");
+        std::fs::write(
+            &script,
+            format!("[IO.File]::WriteAllText('{}', [string]$PID); Start-Sleep 30", pid_file.display()),
+        )
+        .unwrap();
+        let argv = vec![
+            "cmd.exe".into(),
+            "/d".into(),
+            "/c".into(),
+            "powershell.exe".into(),
+            "-NoProfile".into(),
+            "-File".into(),
+            script.display().to_string(),
+        ];
+        let env = std::env::vars().collect();
+        let (pty, mut shell) = spawn_pty(&argv, &env, root.to_str().unwrap(), 80, 24).unwrap();
+        let limit = Instant::now() + Duration::from_secs(10);
+        let pid = loop {
+            if let Ok(text) = std::fs::read_to_string(&pid_file)
+                && let Ok(pid) = text.trim().parse::<i32>()
+            {
+                break pid;
+            }
+            assert!(Instant::now() < limit, "child did not start");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let identity = ProcessIdentity::open(pid).unwrap();
+        let observed = pty.process_in_front(pid, &identity);
+        let outside_pid = std::process::id() as i32;
+        let outside_identity = ProcessIdentity::open(outside_pid).unwrap();
+        let outside = pty.process_in_front(outside_pid, &outside_identity);
+        pty.signal(shell.id(), super::super::signal::KILL);
+        wait(&mut shell).unwrap();
+        let limit = Instant::now() + Duration::from_secs(5);
+        while identity.is_alive() && Instant::now() < limit {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let ended = identity.is_alive();
+        drop(pty);
+        std::fs::remove_dir_all(root).unwrap();
+        assert_ne!(pid, shell.id() as i32);
+        assert_eq!(observed, Some(true));
+        assert_eq!(outside, Some(false));
+        assert!(!ended);
+    }
+    #[test]
+    fn process_identity_tracks_the_process_after_it_exits() {
+        let mut child = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", "Start-Sleep 30"])
+            .spawn()
+            .unwrap();
+        let identity = super::super::windows::ProcessIdentity::open(child.id() as i32).unwrap();
+        assert!(identity.is_alive());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(!identity.is_alive());
+    }
+    #[test]
+    fn a_reporter_in_front_can_be_behind_shell_wrappers_but_not_a_background_sibling() {
+        let p = |pid, parent, started, name: &str| Proc { pid, parent, started, name: name.into() };
+        let processes = [
+            p(10, 1, 1, "powershell.exe"),
+            p(11, 10, 2, "cmd.exe"),
+            p(12, 11, 3, "bash.exe"),
+            p(13, 12, 4, "node.exe"),
+            p(14, 10, 1, "other.exe"),
+            p(15, 13, 5, "worker.exe"),
+        ];
+        assert!(reporter_in_front(10, 13, 4, &processes));
+        assert!(!reporter_in_front(10, 10, 1, &processes));
+        assert!(!reporter_in_front(10, 11, 2, &processes));
+        assert!(!reporter_in_front(10, 13, 99, &processes));
+        assert!(!reporter_in_front(10, 14, 1, &processes));
+        assert!(!reporter_in_front(10, 15, 5, &processes));
+    }
     #[test]
     fn a_direct_program_keeps_its_place_when_it_starts_a_helper() {
         let p = |pid, parent, name: &str| Proc { pid, parent, started: pid as u64, name: name.into() };

@@ -226,6 +226,15 @@ text rewriting needed: only the edit travels.
 Remote paths start at that machine's home unless you set `--cwd`; local
 paths start at your current folder. Prefer explicit paths for remote work.
 
+## Observe a process instance
+
+`hc process <terminal> --pid <pid>` registers a live process on that terminal's
+machine and returns an opaque `token`. Save it before the process reports its
+identity. `hc process <terminal> --pid <pid> --token <token>` checks whether that
+same process is in front; `in_front: null` means the observation is unavailable.
+Tokens belong to one terminal and process instance. They expire when the process
+or terminal ends, or its holder restarts. An older holder cannot observe them.
+
 ## Status, recovery, and cleanup
 
 - State is `live` or `finished`. Status comes from the program's OSC 7501
