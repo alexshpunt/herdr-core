@@ -5,18 +5,6 @@ run-name: fork release ${{ github.sha }}
 on:
   push:
     branches: [master]
-    paths:
-      - Cargo.lock
-      - Cargo.toml
-      - crates/**
-      - vendor/**
-      - distribution/**
-      - scripts/package
-      - scripts/fork_release.py
-      - scripts/mac-bundle
-      - scripts/mac-sign
-      - scripts/fetch-conpty.ps1
-      - .github/workflows/fork-release.yml
   workflow_dispatch:
 
 permissions:

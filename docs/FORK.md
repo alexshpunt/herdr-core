@@ -4,7 +4,7 @@ This fork follows `herdrdev/herdr-core` and adds process-instance and foreground
 
 ## Releases
 
-A push to `master` that changes the core builds five targets on GitHub: Windows x86_64, Linux x86_64 and aarch64, and macOS x86_64 and aarch64. The workflow waits for successful core CI on the exact release commit before creating a GitHub Release. Windows binaries are unsigned; macOS bundles are ad-hoc signed and not notarized. Every archive has a SHA-256 checksum asset. GitHub and HTTPS are trusted for both the archive and checksum; the checksum is not an independent signature.
+Every push to `master` builds five targets on GitHub: Windows x86_64, Linux x86_64 and aarch64, and macOS x86_64 and aarch64. The workflow waits for successful core CI on the exact release commit before creating a GitHub Release. Windows binaries are unsigned; macOS bundles are ad-hoc signed and not notarized. Every archive has a SHA-256 checksum asset. GitHub and HTTPS are trusted for both the archive and checksum; the checksum is not an independent signature.
 
 Install or update the fork:
 

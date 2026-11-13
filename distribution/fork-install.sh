@@ -97,6 +97,10 @@ if [ "$bundle" = 1 ] && [ -x "$tmp/Herdr Core.app/Contents/MacOS/herdr-core" ]; 
       sub(/^hc /, "", old); sub(/^hc /, "", new)
       split(old, a, /[.-]/); split(new, b, /[.-]/)
       for (i=1; i<=3; i++) { if (a[i]+0 > b[i]+0) exit 1; if (a[i]+0 < b[i]+0) exit 0 }
+      # Plain upstream versions sort before fork builds of the same version.
+      if (a[4] == "fork" && b[4] != "fork") exit 1
+      if (a[4] != "fork" && b[4] == "fork") exit 0
+      for (i=5; i<=6; i++) { if (a[i]+0 > b[i]+0) exit 1; if (a[i]+0 < b[i]+0) exit 0 }
     }' || fail "$candidate is older than $installed; use hc update --from with --force to downgrade"
   fi
   case "$releases" in

@@ -54,6 +54,33 @@ class ForkInstaller(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertFalse((self.root / "calls").exists(), "unchanged core was restarted")
 
+    def test_macos_bundle_rejects_an_older_fork_build(self):
+        tools = self.root / "tools"
+        tools.mkdir()
+        for name, body in [("uname", 'if [ "$1" = -m ]; then echo arm64; else echo Darwin; fi'), ("id", 'echo 501')]:
+            shim = tools / name
+            shim.write_text(f'#!/bin/sh\n{body}\n')
+            shim.chmod(0o755)
+        self.env.update(HOME=str(self.root), PATH=str(tools) + os.pathsep + self.env["PATH"])
+        self.bin.mkdir()
+        installed = self.bin / "herdr-core"
+        installed.write_text('#!/bin/sh\necho "hc 0.1.21-fork.18.2"\n')
+        installed.chmod(0o755)
+        candidate = self.root / "candidate"
+        archive = self.assets / "herdr-core-macos-aarch64.tar.gz"
+        for version, accepted in [("0.1.21-fork.17.1", False), ("0.1.21-fork.18.1", False),
+                                  ("0.1.21", False), ("0.1.21-fork.18.3", True)]:
+            with self.subTest(version=version):
+                candidate.write_text(f'#!/bin/sh\necho "hc {version}"\n')
+                candidate.chmod(0o755)
+                with tarfile.open(archive, "w:gz") as tar:
+                    tar.add(candidate, arcname="herdr-core")
+                    tar.add(candidate, arcname="Herdr Core.app/Contents/MacOS/herdr-core")
+                (self.assets / (archive.name + ".sha256")).write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + "\n")
+                result = self.install()
+                self.assertEqual(result.returncode == 0, accepted, result.stderr)
+                self.assertEqual(installed.read_text(), '#!/bin/sh\necho "hc 0.1.21-fork.18.2"\n')
+
     def test_checksum_mismatch_leaves_installed_binary_untouched(self):
         self.bin.mkdir()
         original = self.bin / "herdr-core"
