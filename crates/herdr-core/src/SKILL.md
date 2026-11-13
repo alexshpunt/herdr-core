@@ -290,6 +290,9 @@ or terminal ends, or its holder restarts. An older holder cannot observe them.
   is already current. JSON reports `restarted: true`; terminals keep running.
   Managed installs must be updated with their package manager instead, and
   one in a folder you can't write (Unix) the way it was installed.
+  The personal fork downloads from its own GitHub Releases. Its versions include
+  the fork build number; cross-architecture machine installs require that exact
+  build's release, not the latest one.
 - On macOS, privacy requests from terminal programs belong to Herdr Core,
   not Herdr.app. Existing Herdr.app grants do not transfer to the core.
 - macOS installs keep the newest bundle at the fixed physical path

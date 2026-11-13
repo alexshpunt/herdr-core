@@ -140,6 +140,16 @@ fn older_compares_versions_as_numbers() {
 }
 
 #[test]
+fn fork_builds_are_ordered_and_a_base_version_is_a_minimum() {
+    assert!(older("hc 0.1.21", "hc 0.1.21-fork.14.1"));
+    assert!(older("hc 0.1.21-fork.14.1", "hc 0.1.21-fork.15.1"));
+    assert!(older("hc 0.1.21-fork.15.1", "hc 0.1.21-fork.15.2"));
+    assert!(!older("hc 0.1.21-fork.15.1", "hc 0.1.21"));
+    assert!(!older("hc 0.1.21-fork.15.1", "hc 0.1.21-fork.15.1"));
+    assert!(release_version("0.1.21-fork.15.2").is_ok());
+    assert!(release_version("0.1.21-fork.15.2/../../latest").is_err());
+}
+#[test]
 fn labels_need_a_key() {
     assert!(Cli::try_parse_from(["hc", "label", "t1", "nokey"]).is_err());
     assert!(Cli::try_parse_from(["hc", "label", "t1", "=v"]).is_err());

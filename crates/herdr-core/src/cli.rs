@@ -583,10 +583,18 @@ fn run(cmd: Option<Cmd>, json: bool, asked: bool) -> Result<Option<Out>, RpcErro
             }
             // Only when asked: hc never checks for updates on its own.
             let scratch = crate::releases::Scratch::new()?;
-            let requested = version
-                .as_deref()
-                .map(|v| if !force && !older(&this, &format!("hc {v}")) { env!("CARGO_PKG_VERSION") } else { v });
+            let requested =
+                version.as_deref().filter(|v| std::env::var_os("HERDR_RELEASES_URL").is_some() || v.contains("-fork."));
             let m = crate::releases::manifest(requested, &scratch.0)?;
+            if let Some(minimum) = &version
+                && older(&format!("hc {}", m.version), &format!("hc {minimum}"))
+            {
+                return Err(RpcError::new(
+                    "refused",
+                    format!("latest fork release {} is older than {minimum}", m.version),
+                    "",
+                ));
+            }
             // Apps and scripts built for this generation would break on another one.
             if m.generation != crate::api::GENERATION && !force {
                 return Err(RpcError::new(

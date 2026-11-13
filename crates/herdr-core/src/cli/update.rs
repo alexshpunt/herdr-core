@@ -9,22 +9,16 @@ pub(super) fn version_of(path: &std::path::Path) -> Option<String> {
     (out.status.success() && v.starts_with("hc ")).then_some(v)
 }
 
-/// A release name for `--version`: `0.1.4` (it goes into a URL).
+/// A numeric release or one exact fork build.
 pub(super) fn release_version(s: &str) -> Result<String, String> {
-    let parts: Vec<&str> = s.split('.').collect();
-    let number = |p: &&str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
-    if parts.len() == 3 && parts.iter().all(number) {
-        Ok(s.into())
-    } else {
-        Err(format!("expected a release like 0.1.4, got {s:?}"))
-    }
+    crate::releases::version_parts(s)
+        .map(|_| s.into())
+        .ok_or_else(|| format!("expected a release like 0.1.4, got {s:?}"))
 }
 
-/// `hc 0.1.9` is older than `hc 0.2.0`; anything unparsed is not older.
+/// Fork builds of the same upstream release follow their numeric build number.
 pub(super) fn older(a: &str, b: &str) -> bool {
-    let parts = |v: &str| -> Option<Vec<u64>> {
-        v.strip_prefix("hc ")?.split(['.', '-']).take(3).map(|p| p.parse().ok()).collect()
-    };
+    let parts = |v: &str| crate::releases::version_parts(v.strip_prefix("hc ")?);
     matches!((parts(a), parts(b)), (Some(a), Some(b)) if a < b)
 }
 

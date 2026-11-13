@@ -1,7 +1,6 @@
-//! Released builds on releases.herdr.dev: the list (`core/latest.json`, or
-//! `core/<version>/manifest.json` for one version) and its checked
-//! downloads. curl, sha256sum/shasum (Windows: its own crypto) and tar do
-//! the work: no HTTP or crypto code in hc for something run this rarely.
+//! Fork releases on GitHub: latest or an exact build's immutable manifest,
+//! with checked archives. HERDR_RELEASES_URL retains the test mirror layout.
+//! curl, sha256sum/shasum (Windows: its own crypto) and tar do the work.
 
 use crate::rpc::RpcError;
 use serde::Deserialize;
@@ -22,15 +21,81 @@ pub struct Target {
     pub sha256: String,
 }
 
-fn base() -> String {
-    std::env::var("HERDR_RELEASES_URL")
-        .unwrap_or_else(|_| "https://releases.herdr.dev".into())
-        .trim_end_matches('/')
-        .into()
+const FORK_RELEASES: &str = "https://github.com/alexshpunt/herdr-core/releases";
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Version {
+    base: [u64; 3],
+    fork: Option<(u64, u64)>,
+}
+
+/// A plain upstream version sorts before a fork build of the same version.
+pub(crate) fn version_parts(version: &str) -> Option<Version> {
+    let (base, fork) = match version.split_once('-') {
+        Some((base, suffix)) => {
+            let mut parts = suffix.strip_prefix("fork.")?.split('.');
+            let run = parts.next()?.parse::<u64>().ok()?;
+            let attempt = parts.next()?.parse::<u64>().ok()?;
+            if parts.next().is_some() || run == 0 || attempt == 0 {
+                return None;
+            }
+            (base, Some((run, attempt)))
+        }
+        None => (version, None),
+    };
+    let mut parts = base.split('.');
+    let base = [parts.next()?.parse().ok()?, parts.next()?.parse().ok()?, parts.next()?.parse().ok()?];
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(Version { base, fork })
+}
+
+fn fork_tag(version: &str) -> Option<String> {
+    let (run, attempt) = version_parts(version)?.fork?;
+    Some(format!("fork-{run}-{attempt}"))
 }
 
 fn unavailable(why: String) -> RpcError {
-    RpcError::new("unavailable", why, "check your connection; the releases are at releases.herdr.dev")
+    RpcError::new("unavailable", why, "check the fork's GitHub releases and your connection")
+}
+
+fn manifest_url(version: Option<&str>, mirror: Option<&str>) -> Result<String, RpcError> {
+    if let Some(base) = mirror {
+        let base = base.trim_end_matches('/');
+        return Ok(match version {
+            Some(v) if version_parts(v).is_some() => format!("{base}/core/{v}/manifest.json"),
+            Some(_) => return Err(unavailable("invalid release version".into())),
+            None => format!("{base}/core/latest.json"),
+        });
+    }
+    match version {
+        None => Ok(format!("{FORK_RELEASES}/latest/download/manifest.json")),
+        Some(v) => fork_tag(v)
+            .map(|tag| format!("{FORK_RELEASES}/download/{tag}/manifest.json"))
+            .ok_or_else(|| unavailable(format!("{v} does not identify a fork build"))),
+    }
+}
+
+fn validate_manifest(m: &Manifest, version: Option<&str>, fork: bool) -> Result<(), RpcError> {
+    if version.is_some_and(|v| v != m.version) {
+        return Err(unavailable("release list does not match the requested version".into()));
+    }
+    if fork {
+        let tag = fork_tag(&m.version).ok_or_else(|| unavailable("release list has no fork build identity".into()))?;
+        for (target, artifact) in &m.targets {
+            let ext = match target.as_str() {
+                "windows-x86_64" => "zip",
+                "linux-x86_64" | "linux-aarch64" | "macos-x86_64" | "macos-aarch64" => "tar.gz",
+                _ => return Err(unavailable("release list has an unknown target".into())),
+            };
+            let expected = format!("{FORK_RELEASES}/download/{tag}/herdr-core-{target}.{ext}");
+            if artifact.url != expected {
+                return Err(unavailable("release list points outside its fork build".into()));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn curl(url: &str, to: &Path) -> Result<(), RpcError> {
@@ -49,14 +114,15 @@ fn curl(url: &str, to: &Path) -> Result<(), RpcError> {
 
 /// The latest release's list, or one version's.
 pub fn manifest(version: Option<&str>, scratch: &Path) -> Result<Manifest, RpcError> {
-    let url = match version {
-        Some(v) => format!("{}/core/{v}/manifest.json", base()),
-        None => format!("{}/core/latest.json", base()),
-    };
+    let mirror = std::env::var("HERDR_RELEASES_URL").ok();
+    let url = manifest_url(version, mirror.as_deref())?;
     let file = scratch.join("manifest.json");
     curl(&url, &file)?;
     let bytes = std::fs::read(&file).map_err(|e| unavailable(e.to_string()))?;
-    serde_json::from_slice(&bytes).map_err(|e| unavailable(format!("{url} is not a release list: {e}")))
+    let manifest =
+        serde_json::from_slice(&bytes).map_err(|e| unavailable(format!("{url} is not a release list: {e}")))?;
+    validate_manifest(&manifest, version, mirror.is_none())?;
+    Ok(manifest)
 }
 
 /// Windows' own tar opens zips; Git Bash's GNU tar, often first on PATH there, can't.
@@ -145,4 +211,38 @@ impl Drop for Scratch {
 /// This machine as release targets name it: `linux-x86_64`, `macos-aarch64`.
 pub fn this_target() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fork_manifests_bind_every_download_to_the_identified_release() {
+        let valid: Manifest = serde_json::from_value(serde_json::json!({
+            "version": "0.1.21-fork.18.2", "generation": 1,
+            "targets": {"linux-x86_64": {"url": "https://github.com/alexshpunt/herdr-core/releases/download/fork-18-2/herdr-core-linux-x86_64.tar.gz", "sha256": "00"}}
+        })).unwrap();
+        assert!(validate_manifest(&valid, None, true).is_ok());
+        assert!(validate_manifest(&valid, Some("0.1.21-fork.18.1"), true).is_err());
+        let mut wrong = valid;
+        wrong.targets.get_mut("linux-x86_64").unwrap().url = "https://releases.herdr.dev/core/archive.tar.gz".into();
+        assert!(validate_manifest(&wrong, None, true).is_err());
+        assert!(validate_manifest(&wrong, None, false).is_ok());
+    }
+
+    #[test]
+    fn github_urls_use_latest_or_the_immutable_exact_build() {
+        let base = "https://github.com/alexshpunt/herdr-core/releases";
+        assert_eq!(manifest_url(None, None).unwrap(), format!("{base}/latest/download/manifest.json"));
+        assert_eq!(
+            manifest_url(Some("0.1.21-fork.18.2"), None).unwrap(),
+            format!("{base}/download/fork-18-2/manifest.json")
+        );
+        assert!(manifest_url(Some("0.1.21"), None).is_err());
+        assert!(manifest_url(Some("0.1.21-fork.18.2/../x"), None).is_err());
+        assert_eq!(
+            manifest_url(Some("0.1.21"), Some("http://localhost:5000/")).unwrap(),
+            "http://localhost:5000/core/0.1.21/manifest.json"
+        );
+    }
 }

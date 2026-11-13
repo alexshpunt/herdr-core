@@ -3,8 +3,9 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         return;
     }
-    let plist = include_str!("../../distribution/macos-Info.plist")
-        .replace("@VERSION@", &std::env::var("CARGO_PKG_VERSION").unwrap());
+    let version = std::env::var("CARGO_PKG_VERSION").unwrap();
+    let plist =
+        include_str!("../../distribution/macos-Info.plist").replace("@VERSION@", version.split('-').next().unwrap());
     let path = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("Info.plist");
     std::fs::write(&path, plist).unwrap();
     // Separate arguments preserve paths containing spaces.
