@@ -1,0 +1,92 @@
+# Verify the exact upstream merge before fast-forwarding the personal fork.
+name: fork sync upstream
+
+on:
+  schedule:
+    - cron: '43 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+  checks: read
+
+concurrency:
+  group: fork-core-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'alexshpunt/herdr-core' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.candidate.outputs.changed }}
+      branch: ${{ steps.candidate.outputs.branch }}
+      sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare a candidate without changing master
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth setup-git
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          result=$(python3 scripts/fork-sync.py prepare --branch "automation/upstream-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
+          printf '%s\n' "$result"
+          printf '%s\n' "$result" | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> "$GITHUB_OUTPUT"
+
+  verify:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - name: Run core CI on the exact candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ needs.prepare.outputs.branch }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          run=''
+          for _ in $(seq 1 36); do
+            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch "$BRANCH" --event workflow_dispatch --limit 20 --json databaseId,headSha --jq "[.[] | select(.headSha == \"$SHA\") | .databaseId] | first // empty")
+            [ -z "$run" ] || break
+            sleep 5
+          done
+          [ -n "$run" ] || { echo 'CI did not start for the candidate'; exit 1; }
+          gh run watch "$run" --repo "$GITHUB_REPOSITORY" --exit-status
+          actual=$(gh run view "$run" --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)
+          [ "$actual" = "$SHA" ] || { echo 'CI ran on another commit'; exit 1; }
+
+  land:
+    needs: [prepare, verify]
+    if: needs.verify.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fast-forward only the verified candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ needs.prepare.outputs.branch }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          gh auth setup-git
+          python3 scripts/fork-sync.py land --branch "$BRANCH" --sha "$SHA"
+      # Pushes by GITHUB_TOKEN do not trigger other workflows.
+      - name: Build the fork release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run fork-release.yml --repo "$GITHUB_REPOSITORY" --ref master
+
