@@ -20,6 +20,29 @@ use windows_sys::Win32::System::Pipes::*;
 use windows_sys::Win32::System::Threading::*;
 use windows_sys::core::BOOL;
 
+/// A handle to one process instance, even after its numeric PID is reused.
+pub struct ProcessIdentity {
+    pid: i32,
+    handle: OwnedHandle,
+}
+
+impl ProcessIdentity {
+    /// Opens a live process for observation.
+    pub fn open(pid: i32) -> Option<Self> {
+        let pid = u32::try_from(pid).ok().filter(|p| *p != 0)?;
+        let raw = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+        if raw.is_null() {
+            return None;
+        }
+        let identity = Self { pid: pid as i32, handle: unsafe { OwnedHandle::from_raw_handle(raw) } };
+        identity.is_alive().then_some(identity)
+    }
+
+    /// Whether the original process is still running.
+    pub fn is_alive(&self) -> bool {
+        unsafe { WaitForSingleObject(self.handle.as_raw_handle() as HANDLE, 0) == WAIT_TIMEOUT }
+    }
+}
 fn wide(s: &std::ffi::OsStr) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
     s.encode_wide().chain(Some(0)).collect()
@@ -1046,6 +1069,14 @@ impl Pty {
         super::windows_foreground::in_front(self.job.as_raw_handle() as HANDLE, self.pid) as i32
     }
 
+    /// Whether this process instance is the program in front, through shell wrappers.
+    pub fn process_in_front(&self, pid: i32, identity: &ProcessIdentity) -> Option<bool> {
+        if pid != identity.pid || !identity.is_alive() {
+            return Some(false);
+        }
+        let result = super::windows_foreground::reporter(self.job.as_raw_handle() as HANDLE, self.pid, pid as u32);
+        if !identity.is_alive() { Some(false) } else { result }
+    }
     /// Ctrl+C through the console for an interrupt; anything harder ends the
     /// whole job (Windows has no hangup or terminate to ask with).
     pub fn signal(&self, _pid: u32, signal: i32) {

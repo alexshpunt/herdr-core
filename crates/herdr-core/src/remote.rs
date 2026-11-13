@@ -793,6 +793,7 @@ pub fn conn_key(conn: &Arc<Conn>) -> usize {
 const ON_A_TERMINAL: &[&str] = &[
     "terminal.attach",
     "terminal.get",
+    "terminal.process",
     "terminal.kill",
     "terminal.rm",
     "terminal.label",

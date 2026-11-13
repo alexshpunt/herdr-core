@@ -9,6 +9,59 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::process::Stdio;
 
 #[test]
+fn process_tokens_follow_their_own_live_terminal_process() {
+    let s = Session::new();
+    let terminal = run(&s, &["sh", "-c", "exec sleep 300"]);
+    let other = run(&s, &["sh", "-c", "exec sleep 300"]);
+    let pid = get(&s, &terminal)["pid"].as_i64().unwrap();
+    let mut conn = s.connect();
+    let registered = conn.call(1, "terminal.process", json!({"terminal": terminal, "pid": pid}));
+    let token = registered["result"]["token"].as_str().expect("a live process gets a token");
+    assert!(!token.is_empty());
+    let check = |conn: &mut common::Conn, id, terminal: &str, pid, token: &str| {
+        conn.call(id, "terminal.process", json!({"terminal": terminal, "pid": pid, "token": token}))
+    };
+    assert_eq!(check(&mut conn, 2, &terminal, pid, token)["result"]["in_front"], true);
+    std::thread::scope(|scope| {
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let terminal = &terminal;
+        let session = &s;
+        let valid = {
+            let barrier = barrier.clone();
+            scope.spawn(move || {
+                let mut conn = session.connect();
+                barrier.wait();
+                conn.call(10, "terminal.process", json!({"terminal": terminal, "pid": pid, "token": token}))
+            })
+        };
+        let invalid = scope.spawn(move || {
+            let mut conn = session.connect();
+            barrier.wait();
+            conn.call(11, "terminal.process", json!({"terminal": terminal, "pid": pid, "token": "wrong"}))
+        });
+        assert_eq!(valid.join().unwrap()["result"]["in_front"], true);
+        let invalid = invalid.join().unwrap();
+        assert!(invalid["result"].is_object(), "{invalid}");
+        assert_ne!(invalid["result"]["in_front"], true);
+    });
+    for result in [
+        check(&mut conn, 3, &other, pid, token),
+        check(&mut conn, 4, &terminal, pid + 1, token),
+        check(&mut conn, 5, &terminal, pid, "not-a-token"),
+    ] {
+        assert!(result["result"].is_object(), "{result}");
+        assert_ne!(result["result"]["in_front"], true);
+    }
+    s.json(&["server", "restart"]);
+    s.json(&["server", "status"]);
+    conn = s.connect();
+    assert_eq!(check(&mut conn, 6, &terminal, pid, token)["result"]["in_front"], true);
+    s.json(&["kill", &terminal]);
+    let after = check(&mut conn, 7, &terminal, pid, token);
+    assert!(after["result"].is_object(), "{after}");
+    assert_ne!(after["result"]["in_front"], true);
+}
+#[test]
 fn delivery_and_restart_errors_are_discoverable() {
     let doc = herdr_core::api::openrpc();
     for (method, kind) in [("terminal.send", "cancelled"), ("server.restart", "invalid_params")] {

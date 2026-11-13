@@ -17,6 +17,7 @@ Terminals
   run <cmd|template> [task]   run it and wait like a shell (--bg: don't wait)
   ls                          list live terminals (--all: finished too)
   get <t>                     show one terminal
+  process <t> --pid <pid>     register or observe a process instance
   attach [t]                  put this terminal on it (ctrl+\ detaches)
   read <t>                    print its screen and history
   kill <t>                    end its program
@@ -429,6 +430,23 @@ Arguments:
 Options:
       --json  JSON output even in a terminal
   -h, --help  Print help
+```
+
+## hc process
+
+```text
+Register or observe a terminal process instance
+
+Usage: hc process [OPTIONS] --pid <PID> <TERMINAL>
+
+Arguments:
+  <TERMINAL>  The terminal: `t7`, a name, or `machine/t7`
+
+Options:
+      --json           JSON output even in a terminal
+      --pid <PID>      The process ID as observed on the terminal's machine
+      --token <TOKEN>  A token previously returned for this process instance
+  -h, --help           Print help
 ```
 
 ## hc put

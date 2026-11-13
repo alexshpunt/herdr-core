@@ -21,6 +21,8 @@ pub const GOODBYE: u8 = 7;
 pub const FOREGROUND: u8 = 8;
 /// An older build: take no new terminals, exit once the last one is gone.
 pub const DRAIN: u8 = 9;
+/// Observe one process instance in a terminal.
+pub const PROCESS: u8 = 10;
 // holder → core
 pub const WELCOME: u8 = 101;
 pub const TAIL: u8 = 102;
@@ -30,6 +32,7 @@ pub const SPAWN_FAILED: u8 = 105;
 pub const EXITED: u8 = 106;
 pub const BYE: u8 = 107;
 pub const FOREGROUND_IS: u8 = 108;
+pub const PROCESS_IS: u8 = 109;
 
 #[derive(Serialize, Deserialize)]
 pub struct Hello {
@@ -104,6 +107,20 @@ pub struct HeldTerminal {
 pub struct Foreground {
     /// -1 when there is none or the terminal is gone.
     pub pgid: i32,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ProcessRequest {
+    pub request: String,
+    pub pid: i32,
+    pub token: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ProcessReply {
+    pub request: String,
+    pub token: Option<String>,
+    pub in_front: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize)]

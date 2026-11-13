@@ -20,7 +20,7 @@ struct Fault {
 }
 
 impl Fault {
-    fn new(s: &Session, fail_handshake: bool) -> Self {
+    fn new(s: &Session, fail_handshake: bool, drop_process: bool) -> Self {
         let dir = s.root.join("run/herdr-core");
         let path = std::fs::read_dir(dir)
             .unwrap()
@@ -68,7 +68,15 @@ impl Fault {
                 let mut c = client.try_clone().unwrap();
                 let mut u = upstream.try_clone().unwrap();
                 std::thread::spawn(move || {
-                    let _ = io::copy(&mut c, &mut u);
+                    if drop_process {
+                        while let Ok(Some((kind, id, payload))) = proto::read(&mut c) {
+                            if kind != proto::PROCESS && u.write_all(&proto::frame(kind, id, &payload)).is_err() {
+                                break;
+                            }
+                        }
+                    } else {
+                        let _ = io::copy(&mut c, &mut u);
+                    }
                     let _ = u.shutdown(std::net::Shutdown::Write);
                 });
                 let spawned = spawned.clone();
@@ -113,11 +121,27 @@ fn alive(pid: u32) -> bool {
 }
 
 #[test]
+fn a_holder_that_does_not_understand_process_observation_returns_unknown() {
+    let s = Session::new();
+    s.json(&["run", "--bg", "sleep", "100"]);
+    let pid = s.json(&["get", "t1"])["pid"].as_u64().unwrap().to_string();
+    let fault = Fault::new(&s, false, true);
+    s.json(&["server", "restart"]);
+    let start = Instant::now();
+    let response = s.json(&["process", "t1", "--pid", &pid]);
+    assert!(start.elapsed() < Duration::from_secs(3), "an older holder must not hang the core");
+    assert!(response["token"].is_null(), "{response}");
+    assert!(response["in_front"].is_null(), "{response}");
+    s.json(&["server", "stop"]);
+    drop(fault);
+}
+
+#[test]
 fn reconnect_completes_a_launch_whose_acknowledgement_was_lost() {
     let mut s = Session::new();
     s.env.push(("HC_SPAWN_MS".into(), "2000".into()));
     s.json(&["run", "--bg", "sleep", "100"]);
-    let fault = Fault::new(&s, false);
+    let fault = Fault::new(&s, false, false);
     s.json(&["server", "restart"]);
     let mut events = s.connect();
     events.call(1, "events.subscribe", serde_json::json!({}));
@@ -138,7 +162,7 @@ fn reconnect_completes_a_kept_replacement_whose_acknowledgement_was_lost() {
     s.env.push(("SHELL".into(), "/bin/sh".into()));
     s.json(&["run", "--bg", "--keep", "sleep", "100"]);
     let original = s.json(&["get", "t1"])["pid"].as_u64().unwrap() as u32;
-    let fault = Fault::new(&s, false);
+    let fault = Fault::new(&s, false, false);
     s.json(&["server", "restart"]);
     let mut events = s.connect();
     events.call(1, "events.subscribe", serde_json::json!({}));
@@ -174,7 +198,7 @@ fn explicit_stop_ends_programs_and_holder_after_a_failed_relink() {
     s.json(&["run", "--bg", "sleep", "100"]);
     let original = s.json(&["get", "t1"])["pid"].as_u64().unwrap() as u32;
     let holder = s.json(&["server", "status"])["holder"]["pid"].as_u64().unwrap() as u32;
-    let fault = Fault::new(&s, true);
+    let fault = Fault::new(&s, true, false);
     s.json(&["server", "restart"]);
     let run = s.hc(&["--json", "run", "--bg", "sleep", "100"]);
     assert!(!run.status.success());

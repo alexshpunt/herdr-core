@@ -226,6 +226,15 @@ text rewriting needed: only the edit travels.
 Remote paths start at that machine's home unless you set `--cwd`; local
 paths start at your current folder. Prefer explicit paths for remote work.
 
+## Observe a process instance
+
+`hc process <terminal> --pid <pid>` registers a live process on that terminal's
+machine and returns an opaque `token`. Save it before the process reports its
+identity. `hc process <terminal> --pid <pid> --token <token>` checks whether that
+same process is in front; `in_front: null` means the observation is unavailable.
+Tokens belong to one terminal and process instance. They expire when the process
+or terminal ends, or its holder restarts. An older holder cannot observe them.
+
 ## Status, recovery, and cleanup
 
 - State is `live` or `finished`. Status comes from the program's OSC 7501
@@ -281,6 +290,9 @@ paths start at your current folder. Prefer explicit paths for remote work.
   is already current. JSON reports `restarted: true`; terminals keep running.
   Managed installs must be updated with their package manager instead, and
   one in a folder you can't write (Unix) the way it was installed.
+  The personal fork downloads Windows x86_64 builds from its own GitHub Releases.
+  It does not publish Linux or macOS builds. Its versions include the fork build
+  number.
 - On macOS, privacy requests from terminal programs belong to Herdr Core,
   not Herdr.app. Existing Herdr.app grants do not transfer to the core.
 - macOS installs keep the newest bundle at the fixed physical path
