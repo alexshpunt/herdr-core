@@ -379,6 +379,18 @@ pub struct KeepParams {
     /// Keep this live terminal after loss. Existing streams end with the loss reason; reattach after `restarted`.
     #[arg(long = "off", action = clap::ArgAction::SetFalse, default_value_t = true)]
     pub keep: bool,
+    /// After `--`: a command to run once in place of the recovery shell after
+    /// the next loss; when it ends, however it ends, the shell starts. The core
+    /// never reads or derives it. Absent leaves it as it is; empty or `--off`
+    /// forgets it.
+    #[arg(last = true)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recover: Option<Vec<String>>,
+    /// Forget the recovery command, keep the terminal kept.
+    #[arg(long, conflicts_with = "recover")]
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub no_recover: bool,
 }
 
 #[derive(Serialize, JsonSchema)]

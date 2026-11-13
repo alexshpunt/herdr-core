@@ -493,3 +493,37 @@ fn a_saved_screen_comes_back_once_not_after_a_later_loss_that_saved_nothing() {
     wait_until("new shell answers", || text(&s, &t).contains("after-2"));
     assert!(!text(&s, &t).contains("before-the-update"), "a screen from before the update came back");
 }
+
+#[test]
+fn a_recovery_command_runs_once_after_a_loss_then_the_shell() {
+    let s = Session::new();
+    let t = run(&s, &["--keep", "sleep", "100"]);
+    let r = s.json(&["keep", &t, "--", "sh", "-c", "echo recovered-$((40+2)); exit 3"]);
+    assert_eq!(r["recover"], serde_json::json!(["sh", "-c", "echo recovered-$((40+2)); exit 3"]));
+    let mut events = s.connect();
+    events.call(1, "events.subscribe", serde_json::json!({"terminal": t}));
+    let kill_holder = || unsafe {
+        libc::kill(s.json(&["server", "status"])["holder"]["pid"].as_i64().unwrap() as i32, libc::SIGKILL);
+    };
+    kill_holder();
+    next_event(&mut events, |e| e["params"]["type"] == "lost" && e["params"]["data"]["reason"] == "holder_lost");
+    let event = next_event(&mut events, |e| e["params"]["type"] == "lost");
+    assert_eq!(event["params"]["data"]["reason"], "recovered", "its exit, even non-zero, leads to the shell");
+    assert_eq!(event["params"]["data"]["exit_code"], 3);
+    next_event(&mut events, |e| e["params"]["type"] == "restarted");
+    let r = get(&s, &t);
+    assert_eq!(r["state"], "live");
+    assert!(r["recover"].is_null(), "used once: {r}");
+    s.json(&["send", &t, "echo shell-$((1+1))"]);
+    wait_until("the shell follows", || text(&s, &t).contains("shell-2"));
+    kill_holder();
+    next_event(&mut events, |e| e["params"]["type"] == "restarted");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(!text(&s, &t).contains("recovered-42"), "a second loss gets a plain shell");
+    s.json(&["keep", &t, "--", "true"]);
+    assert_eq!(s.json(&["keep", &t])["recover"], serde_json::json!(["true"]), "absent leaves it");
+    assert!(s.json(&["keep", &t, "--no-recover"])["recover"].is_null(), "forgotten, still kept");
+    s.json(&["keep", &t, "--", "true"]);
+    assert!(s.json(&["keep", &t, "--off"])["recover"].is_null(), "keep off forgets it");
+    assert_eq!(s.err(&["keep", &t, "--off", "--", "true"]).1["error"]["kind"], "invalid_params");
+}

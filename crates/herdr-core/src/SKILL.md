@@ -288,6 +288,13 @@ or terminal ends, or its holder restarts. An older holder cannot observe them.
   reading it can match old output. Saved screens are consumed or discarded once; a power cut
   that saves nothing starts blank. Streams end on loss; reattach after the
   restarted event. Pending input/attach may be unavailable: retry after recovery.
+- `hc keep <t> -- <argv>` stores a recovery command: after the next loss it
+  runs once instead of the shell, in the same folder and environment, then the
+  shell starts whatever its exit (`lost` with reason `recovered`). The core
+  never reads or derives it; a program can set it for itself while it runs
+  (e.g. `hc keep "$HC_TERMINAL_ID" -- claude --resume <id>`) and drop it with
+  `--no-recover` when it quits on purpose. `--off` forgets it too. Every API
+  client can read it: keep secrets out.
 - Once work is accepted: `hc kill <t>`, then `hc rm <t>`. Only clean up
   terminals you started; `hc ls` includes your user's other live work.
 - `hc update` also restarts an older running core when the installed binary

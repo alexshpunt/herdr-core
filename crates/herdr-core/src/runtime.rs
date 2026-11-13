@@ -814,6 +814,8 @@ impl Core {
             "killed"
         } else if reason == "exited" && st.reg.terminals[&id].keep && exit.code.is_none() && exit.signal.is_some() {
             "signaled"
+        } else if reason == "exited" && st.reg.terminals[&id].keep && st.reg.terminals[&id].recovering {
+            "recovered"
         } else {
             reason
         };

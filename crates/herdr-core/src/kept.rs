@@ -98,7 +98,10 @@ impl Core {
             let (env, scope) = crate::api::terminal_env(&self, id, &cwd, env);
             t.scope = Some(scope);
             t.holder = Some(instance);
-            t.argv = shell.clone();
+            // A recovery command runs once; whatever ends it, the shell follows.
+            let recover = t.recover.take().filter(|argv| !argv.is_empty());
+            t.recovering = recover.is_some();
+            t.argv = recover.unwrap_or_else(|| shell.clone());
             t.cwd = cwd.clone();
             t.template = None;
             t.reported = false;

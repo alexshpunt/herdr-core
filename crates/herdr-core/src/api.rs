@@ -101,7 +101,7 @@ methods! { Ctx<'_>;
         "Remove a finished terminal.",
         errors ["not_found", "machine_unknown", "live", "unavailable"];
     "terminal.keep" => terminal_keep, KeepParams => Public,
-        "Set whether a live terminal restarts as a shell after loss, including death by signal without an exit code. Exit with a code and explicit kill close it. Recovery runs on every OS after a grace delay, except while the core stops/restarts or Windows reports session shutdown. Streams end on loss; reattach after restarted.", errors ["not_found", "invalid_params", "unavailable"];
+        "Set whether a live terminal restarts as a shell after loss, including death by signal without an exit code. `recover` sets an argv that runs once instead of that shell after the next loss, then the shell; absent leaves it, empty forgets it. Exit with a code and explicit kill close it. Recovery runs on every OS after a grace delay, except while the core stops/restarts or Windows reports session shutdown. Streams end on loss; reattach after restarted.", errors ["not_found", "invalid_params", "unavailable"];
     "terminal.label" => terminal_label, LabelParams => Public,
         "Set or remove labels (free-form `key=value`, never interpreted).",
         errors ["not_found", "machine_unknown", "invalid_params", "unavailable"];
@@ -377,9 +377,16 @@ async fn terminal_keep(core: Ctx<'_>, p: KeepParams) -> Result<Public, RpcError>
         if !t.is_live() {
             return Err(RpcError::invalid_params("only live terminals can be kept"));
         }
+        if !p.keep && p.recover.as_ref().is_some_and(|argv| !argv.is_empty()) {
+            return Err(RpcError::invalid_params("a recovery command needs keep"));
+        }
         t.keep = p.keep;
+        if !p.keep || p.recover.is_some() {
+            t.recover = p.recover.filter(|argv| !argv.is_empty());
+        }
         let lost = (!p.keep && t.holder.is_none()).then(|| t.reason.clone().unwrap_or_else(|| "holder_lost".into()));
-        core.emit(&mut st, "keep", id, json!({"keep": p.keep}));
+        let recover = t.recover.clone();
+        core.emit(&mut st, "keep", id, json!({"keep": p.keep, "recover": recover}));
         if let Some(reason) = lost {
             core.record_finish(&mut st, id, proto::Exit { code: None, signal: None }, &reason);
             core.changed.notify_waiters();

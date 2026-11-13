@@ -247,15 +247,17 @@ Options:
 ```text
 Keep a live terminal after loss (--off disables)
 
-Usage: hc keep [OPTIONS] <TERMINAL>
+Usage: hc keep [OPTIONS] <TERMINAL> [-- <RECOVER>...]
 
 Arguments:
-  <TERMINAL>  The terminal: `t7`, a name, or `machine/t7`
+  <TERMINAL>    The terminal: `t7`, a name, or `machine/t7`
+  [RECOVER]...  After `--`: a command to run once in place of the recovery shell after the next loss; when it ends, however it ends, the shell starts. The core never reads or derives it. Absent leaves it as it is; empty or `--off` forgets it
 
 Options:
-      --json  JSON output even in a terminal
-      --off   Keep this live terminal after loss. Existing streams end with the loss reason; reattach after `restarted`
-  -h, --help  Print help
+      --json        JSON output even in a terminal
+      --off         Keep this live terminal after loss. Existing streams end with the loss reason; reattach after `restarted`
+      --no-recover  Forget the recovery command, keep the terminal kept
+  -h, --help        Print help
 ```
 
 ## hc keys
