@@ -19,6 +19,13 @@ installable skill is the short stub in `skills/herdr-core/SKILL.md`: it says
 when to use hc and points to `hc --skill`, so it rarely changes.
 Keep the manual current when changing agent-facing behavior.
 
+## Personal fork platform policy
+
+The personal `alexshpunt/herdr-core` fork builds, tests and publishes Windows
+x86_64 only. Do not wait for or maintain Linux or macOS CI and releases for
+this fork. Preserve upstream platform code when syncing; this policy does not
+change upstream's supported platforms.
+
 ## The rule
 
 Core is a runtime, not a multiplexer. If a feature only makes sense with a
@@ -65,9 +72,8 @@ layout or a workspace to return to, it does not belong here.
   money. Ask before running them.
 - A dependency change (crates or Ghostty) needs `just notices`; a test fails
   if a crate is missing from the notices.
-- `rustfmt.toml` width 120 is the format and CI checks it: `just fmt`.
-  `just lint` is fmt, clippy, and clippy for Windows from Linux. `just check`
-  is lint plus the whole suite. Run it before proposing a commit.
+- `rustfmt.toml` width 120 is the format. Run formatting, Windows clippy and
+  the Windows test suite before proposing a commit to the personal fork.
 
 ## Contributing
 

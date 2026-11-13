@@ -7,7 +7,7 @@ import pathlib
 import re
 import sys
 
-TARGETS = ('linux-x86_64', 'linux-aarch64', 'macos-x86_64', 'macos-aarch64', 'windows-x86_64')
+TARGETS = ('windows-x86_64',)
 RELEASES = 'https://github.com/alexshpunt/herdr-core/releases'
 
 

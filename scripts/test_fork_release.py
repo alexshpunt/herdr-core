@@ -1,14 +1,13 @@
 import hashlib
 import json
 import pathlib
-import plistlib
 import subprocess
 import sys
 import tempfile
 import unittest
 
 SCRIPT = pathlib.Path(__file__).with_name('fork_release.py')
-TARGETS = ['linux-x86_64', 'linux-aarch64', 'macos-x86_64', 'macos-aarch64', 'windows-x86_64']
+TARGETS = ['windows-x86_64']
 
 
 class ForkReleaseTest(unittest.TestCase):
@@ -38,18 +37,6 @@ class ForkReleaseTest(unittest.TestCase):
                 self.assertEqual(m['targets'][target]['url'], f'https://github.com/alexshpunt/herdr-core/releases/download/fork-18-2/herdr-core-{target}.{ext}')
                 self.assertEqual(m['targets'][target]['sha256'], hashlib.sha256(target.encode()).hexdigest())
 
-    def test_macos_bundle_uses_a_numeric_plist_version(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = pathlib.Path(tmp)
-            binary = root / 'herdr-core'
-            binary.write_text('#!/bin/sh\necho hc 0.1.21-fork.18.2\n')
-            binary.chmod(0o755)
-            app = root / 'Herdr Core.app'
-            subprocess.run(['sh', str(SCRIPT.with_name('mac-bundle')), str(binary), str(app)], check=True)
-            with (app / 'Contents/Info.plist').open('rb') as info:
-                plist = plistlib.load(info)
-            self.assertEqual(plist['CFBundleVersion'], '0.1.21')
-            self.assertEqual(plist['CFBundleShortVersionString'], '0.1.21')
     def test_corrupt_artifact_cannot_produce_a_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

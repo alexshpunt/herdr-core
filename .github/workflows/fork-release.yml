@@ -30,10 +30,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Test fork sync and Unix installer
+      - name: Test fork sync and release manifest
         run: |
           python3 scripts/test_fork_sync.py
-          python3 scripts/test_fork_install.py
           python3 scripts/test_fork_release.py
       - name: Require successful core CI for this exact commit
         env:
@@ -57,10 +56,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: linux-x86_64, target: x86_64-unknown-linux-musl, runner: ubuntu-latest }
-          - { name: linux-aarch64, target: aarch64-unknown-linux-musl, runner: ubuntu-22.04-arm }
-          - { name: macos-aarch64, target: aarch64-apple-darwin, runner: macos-15 }
-          - { name: macos-x86_64, target: x86_64-apple-darwin, runner: macos-15-intel }
           - { name: windows-x86_64, target: x86_64-pc-windows-msvc, runner: windows-2025 }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
@@ -85,32 +80,10 @@ jobs:
           cache-workspace-crates: true
           cache-bin: false
       - name: Give this build its unique fork version
-        run: |
-          if [ "$RUNNER_OS" = Windows ]; then python scripts/fork_release.py version . "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT"
-          else python3 scripts/fork_release.py version . "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT"; fi
+        run: python scripts/fork_release.py version . "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT"
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} -p herdr-core
-      - name: Assemble ad-hoc signed macOS bundle
-        if: runner.os == 'macOS'
-        run: |
-          bin='target/${{ matrix.target }}/release/herdr-core'
-          sh scripts/mac-bundle "$bin" 'target/${{ matrix.target }}/release/Herdr Core.app'
-          scripts/mac-sign 'target/${{ matrix.target }}/release/Herdr Core.app'
-          scripts/mac-sign "$bin"
-      - name: Pack Unix
-        if: runner.os != 'Windows'
-        run: |
-          set -euo pipefail
-          bin='target/${{ matrix.target }}/release/herdr-core'
-          "$bin" --version
-          if [ '${{ runner.os }}' = Linux ]; then
-            file "$bin" | grep -q static
-          fi
-          mkdir -p dist
-          if [ '${{ runner.os }}' = macOS ]; then bin="$(dirname "$bin")/Herdr Core.app"; fi
-          sh scripts/package "$bin" 'dist/herdr-core-${{ matrix.name }}.tar.gz'
       - name: Pack Windows
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $bin = 'target/${{ matrix.target }}/release/herdr-core.exe'
@@ -127,7 +100,6 @@ jobs:
           tar -a -cf 'dist/herdr-core-${{ matrix.name }}.zip' -C stage herdr-core.exe conpty LICENSE THIRD-PARTY-NOTICES
           if ($LASTEXITCODE) { throw 'zip failed' }
       - name: Test Windows installer with an isolated core
-        if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/test-fork-install.ps1 -Source "$pwd/stage"
       - name: Checksum
@@ -171,10 +143,10 @@ jobs:
           fi
           tag="fork-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
           python3 scripts/fork_release.py manifest . "$GITHUB_RUN_NUMBER" "$GITHUB_RUN_ATTEMPT"
-          gh release create "$tag" dist/manifest.json dist/herdr-core-* distribution/fork-install.sh distribution/fork-install.ps1 \
+          gh release create "$tag" dist/manifest.json dist/herdr-core-* distribution/fork-install.ps1 \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "herdr-core fork build ${GITHUB_RUN_NUMBER}" \
-            --notes "Build from ${GITHUB_SHA}. Windows is unsigned. macOS is ad-hoc signed and not notarized." --draft
+            --notes "Build from ${GITHUB_SHA}. Windows is unsigned." --draft
           head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq .object.sha)
           if [ "$head" != "$GITHUB_SHA" ]; then
             gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag

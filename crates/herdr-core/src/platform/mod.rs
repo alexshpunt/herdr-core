@@ -163,9 +163,8 @@ pub fn legacy_bundle_notice(state: &std::path::Path) {
 pub fn verify_release_bundle(path: &std::path::Path) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     if macos_bundle::source_is_bundle(path) {
-        // Fork releases are ad-hoc signed; explicit upstream mirrors retain upstream's check.
-        let local = !std::env::var("HERDR_RELEASES_URL")
-            .is_ok_and(|url| url.trim_end_matches('/') == "https://releases.herdr.dev");
+        let local = std::env::var("HERDR_RELEASES_URL")
+            .is_ok_and(|url| url.trim_end_matches('/') != "https://releases.herdr.dev");
         macos_bundle::verify(path.parent().unwrap().parent().unwrap().parent().unwrap(), local)?;
     }
     Ok(())
