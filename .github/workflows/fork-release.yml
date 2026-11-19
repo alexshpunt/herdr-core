@@ -56,7 +56,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: windows-x86_64, target: x86_64-pc-windows-msvc, runner: windows-2025 }
+          # windows-2022 (VS2022): the VS2026 image's MSVC 14.52 STL rejects zig 0.16's clang.
+          - { name: windows-x86_64, target: x86_64-pc-windows-msvc, runner: windows-2022 }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
     defaults:

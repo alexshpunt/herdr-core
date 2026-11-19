@@ -1,0 +1,32 @@
+#!/bin/bash
+# Resolves the merge conflicts of an upstream sync that need no judgment.
+# Called by fork-sync.py prepare --resolver in the middle of the merge; it only
+# edits files, and fork-sync.py rejects whatever it leaves conflicted.
+#
+# schema/hc.openrpc.json is generated from the code, and both sides add methods
+# to it: take either side, then regenerate it from the merged code (needs Rust and
+# Zig, as a build does). Any other conflict needs a person: the run fails, names
+# the files, and the sync workflow reports it.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+schema=schema/hc.openrpc.json
+mapfile -d '' files < <(git diff -z --name-only --diff-filter=U)
+(( ${#files[@]} )) || { echo "fork-resolve-conflicts: no conflicts" >&2; exit 1; }
+
+others=()
+for file in "${files[@]}"; do
+  [[ $file == "$schema" ]] || others+=("$file")
+done
+if (( ${#others[@]} )); then
+  echo "fork-resolve-conflicts: these conflicts need a hand merge:" >&2
+  printf '  %s\n' "${others[@]}" >&2
+  exit 1
+fi
+
+git checkout --theirs -- "$schema"
+# The merge may move vendor/ghostty; build against the merged pointer.
+git submodule update --init --depth 1
+HC_UPDATE_SCHEMA=1 cargo test --locked -p herdr-core --test m0 -- --exact \
+  the_schema_is_openrpc_and_the_committed_file_matches_the_code
+echo "fork-resolve-conflicts: regenerated $schema from the merged code" >&2

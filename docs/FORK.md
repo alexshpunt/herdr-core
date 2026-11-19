@@ -18,6 +18,12 @@ The installer pins the checksum and archive to the same release. It stages and c
 
 ## Upstream synchronization
 
-`fork-sync-upstream.yml` runs daily at 04:43 UTC and can be started manually on `master`. It prepares a candidate merge on an `automation/upstream-*` branch, runs core CI on that exact SHA, and fast-forwards `master` only if the candidate and base did not change. The release workflow then builds the verified commit. It never force-pushes.
+`fork-sync-upstream.yml` runs daily at 04:43 UTC and can be started manually on `master`. It prepares a candidate merge on an `automation/upstream-*` branch, runs core CI on that exact SHA, and fast-forwards `master` only if the candidate and base did not change. That push starts the release workflow on the verified commit. It never force-pushes.
 
-If a merge conflicts or verification fails, the workflow leaves `master` unchanged and fails the Actions run. Resolve conflicts manually on a branch and review them through a PR; the scheduled workflow does not run a paid model or create public issues. Enable GitHub Actions for the fork. Disable the inherited upstream `release.yml` in this fork; it uses upstream signing and storage infrastructure, not the fork release path.
+A conflict in `schema/hc.openrpc.json`, which both sides extend, resolves itself: `scripts/fork-resolve-conflicts` regenerates the schema from the merged code (`HC_UPDATE_SCHEMA=1` on the m0 schema test). Any other conflict stops the run with the conflicted files listed; the scheduled workflow runs no paid model. Resolve those by hand on a branch and review them through a PR.
+
+Pushes use the `FORK_SYNC_TOKEN` repository secret: a fine-grained personal access token of the owner, limited to this repository and `alexshpunt/herdr-app` with Contents, Workflows and Actions write access and no expiration. The default `GITHUB_TOKEN` cannot push upstream commits that change `.github/workflows`. The merge job never holds the token: it hands the candidate to a fresh job as a git bundle.
+
+When the merge, CI or a push fails, `master` stays unchanged and `scripts/fork-sync-notify.py` opens the Linear issue "Upstream sync of alexshpunt/herdr-core is failing" in project herdr-config (team LPT), or comments on it while it is open, with the run link and the end of the failed log. It uses the `LINEAR_API_KEY` repository secret, a personal Linear key limited to team LPT that can read, create issues and comment. Close the issue once a hand merge lands. Enable GitHub Actions for the fork. Disable the inherited upstream `release.yml` in this fork; it uses upstream signing and storage infrastructure, not the fork release path.
+
+Windows CI and the fork release run on `windows-2022`: on the `windows-2025` image with Visual Studio 2026, MSVC 14.52's STL rejects the clang in zig 0.16 (STL1000) when ghostty builds simdutf.
