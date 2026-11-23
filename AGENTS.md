@@ -26,6 +26,10 @@ x86_64 only. Do not wait for or maintain Linux or macOS CI and releases for
 this fork. Preserve upstream platform code when syncing; this policy does not
 change upstream's supported platforms.
 
+After any change, update the Windows core on the fork owner's laptop (zinlaptop)
+first, before WSL or any other machine: the herdr-app skill describes how.
+`just install` in WSL updates only the WSL core.
+
 ## The rule
 
 Core is a runtime, not a multiplexer. If a feature only makes sense with a
