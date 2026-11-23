@@ -2,7 +2,7 @@
 
 This fork follows `herdrdev/herdr-core` and adds process-instance and foreground membership observations for Herdr App. Those observations let the App validate a folder report through shell wrappers without accepting a reused PID. They require a new core and holder; recreate terminals opened before the update.
 
-A program that turns on focus reports (DEC mode 1004) gets the current focus at once, also when they are on already, not only at the next change. The core takes a new viewer for unfocused, so a viewer whose window has focus must send FOCUS 1 after attaching: the fork's Herdr App and `hc attach` do. With upstream Herdr App, a program in a pane that opened focused is told it is unfocused until the pane loses and regains focus.
+A program that turns on focus reports (DEC mode 1004) gets the current focus at once, also when they are on already, not only at the next change, and hears it is unfocused when the last focused viewer leaves. The core takes a new viewer for unfocused, so a viewer whose window has focus must send FOCUS 1 after attaching: the fork's Herdr App and `hc attach` do. With upstream Herdr App, a program in a pane that opened focused is told it is unfocused until the pane loses and regains focus.
 
 ## Releases
 

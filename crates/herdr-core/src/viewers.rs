@@ -380,17 +380,26 @@ impl Core {
         let mut touched = Vec::new();
         for (id, vs) in st.viewers.iter_mut() {
             let mut typing_left = false;
+            let mut focus_left = false;
             vs.retain(|v| {
                 let leaves = Arc::ptr_eq(&v.conn, conn) && channel.is_none_or(|c| c == v.channel);
                 typing_left |= leaves && !v.observe;
+                focus_left |= leaves && !v.observe && v.focused;
                 !leaves
             });
             if typing_left {
-                touched.push(*id);
+                touched.push((*id, focus_left && !vs.iter().any(|v| v.focused && !v.observe)));
             }
         }
         st.viewers.retain(|_, vs| !vs.is_empty());
-        for id in touched {
+        for (id, blurred) in touched {
+            // The last focused viewer left: nobody looks at the program any more.
+            if blurred
+                && st.screens.get(&id).is_some_and(|s| s.dec_mode(1004))
+                && let Some(link) = st.link(id)
+            {
+                link.input(id, focus_report(false));
+            }
             self.apply_size(&mut st, id);
         }
     }
