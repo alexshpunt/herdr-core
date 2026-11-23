@@ -527,3 +527,20 @@ fn a_recovery_command_runs_once_after_a_loss_then_the_shell() {
     assert!(s.json(&["keep", &t, "--off"])["recover"].is_null(), "keep off forgets it");
     assert_eq!(s.err(&["keep", &t, "--off", "--", "true"]).1["error"]["kind"], "invalid_params");
 }
+
+#[test]
+fn a_restored_screen_names_the_recovery_command_not_a_shell() {
+    let s = Session::new();
+    let config = s.root.join("config/herdr-core/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, "restore_screen = true\n").unwrap();
+    let t = run(&s, &["--keep", "sh", "-c", "printf 'left-on-screen\\n'; exec sleep 100"]);
+    wait_until("output", || text(&s, &t).contains("left-on-screen"));
+    s.json(&["keep", &t, "--", "sh", "-c", "echo resumed-$((40+2)); exec sleep 100"]);
+    unsafe { libc::kill(s.json(&["server", "status"])["holder"]["pid"].as_i64().unwrap() as i32, libc::SIGKILL) };
+    wait_until("recovery command", || text(&s, &t).contains("resumed-42"));
+    let text = text(&s, &t);
+    let at = |needle: &str| text.find(needle).unwrap_or_else(|| panic!("{needle:?} missing: {text:?}"));
+    assert!(at("left-on-screen") < at("its recovery command runs below") && at("its recovery command runs below") < at("resumed-42"), "{text:?}");
+    assert!(!text.contains("this is a new shell"), "{text:?}");
+}

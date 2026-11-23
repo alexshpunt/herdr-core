@@ -28,6 +28,8 @@ impl Terminal {
 
 /// Under what the lost program left on screen, so it isn't taken for something still running.
 const RESTORED: &[u8] = b"\x1b[0m\r\n\x1b[2m-- the program above ended; this is a new shell --\x1b[0m\r\n";
+/// The same, when the terminal's recovery command runs instead of the shell.
+const RESUMED: &[u8] = b"\x1b[0m\r\n\x1b[2m-- the program above ended; its recovery command runs below --\x1b[0m\r\n";
 
 impl Core {
     pub(crate) fn spawn_failed(&self, st: &mut crate::runtime::State, id: u32) {
@@ -115,6 +117,7 @@ impl Core {
             t.paste_gap_ms = None;
             let spawn = proto::Spawn { argv: t.argv.clone(), env, cwd, cols: t.cols, rows: t.rows };
             let identity = t.identity.clone();
+            let recovering = t.recovering;
             if !restore_screen {
                 let _ = std::fs::remove_file(self.snapshot_path(id));
             }
@@ -123,7 +126,7 @@ impl Core {
                 let mut screen = ghostty_vt::Terminal::new(spawn.cols, spawn.rows, self.history_bytes());
                 if restore_screen && let Some(old) = self.take_saved_screen(id) {
                     screen.write(&old.replay());
-                    screen.write(RESTORED);
+                    screen.write(if recovering { RESUMED } else { RESTORED });
                     // ConPTY paints a new console from the top left: move what was there into history.
                     if cfg!(windows) {
                         screen.write(&b"\n".repeat(spawn.rows as usize));
