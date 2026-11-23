@@ -2,6 +2,8 @@
 
 This fork follows `herdrdev/herdr-core` and adds process-instance and foreground membership observations for Herdr App. Those observations let the App validate a folder report through shell wrappers without accepting a reused PID. They require a new core and holder; recreate terminals opened before the update.
 
+A program that turns on focus reports (DEC mode 1004) gets the current focus at once, also when they are on already, not only at the next change. It counts as focused while any typing viewer is focused: it hears it is unfocused only when the last focused viewer loses focus or leaves. The core takes a new viewer for unfocused, so a viewer whose window has focus must send FOCUS 1 after attaching: the fork's Herdr App and `hc attach` do. With upstream Herdr App, a program in a pane that opened focused is told it is unfocused until the pane loses and regains focus.
+
 ## Releases
 
 Every push to `master` builds Windows x86_64 on GitHub. The workflow waits for successful core CI on the exact release commit before creating a GitHub Release. Windows binaries are unsigned. The archive has a SHA-256 checksum asset. GitHub and HTTPS are trusted for both the archive and checksum; the checksum is not an independent signature. The personal fork does not publish Linux or macOS builds.
