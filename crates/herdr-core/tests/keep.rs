@@ -541,6 +541,10 @@ fn a_restored_screen_names_the_recovery_command_not_a_shell() {
     wait_until("recovery command", || text(&s, &t).contains("resumed-42"));
     let text = text(&s, &t);
     let at = |needle: &str| text.find(needle).unwrap_or_else(|| panic!("{needle:?} missing: {text:?}"));
-    assert!(at("left-on-screen") < at("its recovery command runs below") && at("its recovery command runs below") < at("resumed-42"), "{text:?}");
+    assert!(
+        at("left-on-screen") < at("its recovery command runs below")
+            && at("its recovery command runs below") < at("resumed-42"),
+        "{text:?}"
+    );
     assert!(!text.contains("this is a new shell"), "{text:?}");
 }
