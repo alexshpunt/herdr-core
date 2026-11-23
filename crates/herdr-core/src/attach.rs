@@ -229,6 +229,8 @@ pub fn run(paths: &Paths, terminal: &str, observe: bool, history: usize) -> Resu
     let address = terminal.to_string();
     if tty {
         out(b"\x1b[?1004h"); // focus reports: switching back to this window makes it the active viewer
+        // A person just ran this in the window they look at; terminals report only later changes.
+        send(channel, wire::FOCUS, &[1]);
     }
 
     let done = Arc::new(AtomicBool::new(false));
