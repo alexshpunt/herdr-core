@@ -21,6 +21,13 @@ pub struct Terminal {
     /// Replace a lost program with this machine’s shell, in place. Exit with a code and kill remain final.
     #[serde(default)]
     pub keep: bool,
+    /// Runs once in place of that shell after the next loss, then the shell
+    /// (set with `keep`; opaque to the core). Null once used or forgotten.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recover: Option<Vec<String>>,
+    /// Its program is the recovery command: when it ends, the shell starts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub recovering: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_cwd: Option<String>,
     /// Only caller overrides, never the inherited core environment.
@@ -41,7 +48,8 @@ pub struct Terminal {
     /// spawn timed out, but the holder may still be starting it):
     /// exited, killed, server_stop, host_shutdown (Windows
     /// is ending the session, including logout), signaled (a kept program
-    /// died by signal without an exit code), holder_lost (its holder
+    /// died by signal without an exit code), recovered (its recovery command
+    /// ended; the shell follows), holder_lost (its holder
     /// died), stopped_by_restart (nothing ran it any more after a restart).
     pub reason: Option<String>,
     pub created_ms: u64,
@@ -267,6 +275,8 @@ impl Registry {
                 argv: new.argv,
                 cwd: new.cwd,
                 keep: new.keep,
+                recover: None,
+                recovering: false,
                 last_cwd: None,
                 restart_env: BTreeMap::new(),
                 restart_after_ms: 0,
@@ -339,7 +349,7 @@ impl Registry {
             let pending = t.keep
                 && matches!(
                     reason,
-                    "holder_lost" | "stopped_by_restart" | "server_stop" | "host_shutdown" | "signaled"
+                    "holder_lost" | "stopped_by_restart" | "server_stop" | "host_shutdown" | "signaled" | "recovered"
                 );
             t.state = if pending { "live" } else { "finished" }.into();
             if let Some(f) = &t.foreground {
@@ -347,6 +357,9 @@ impl Registry {
             }
             if pending {
                 t.schedule_restart(now_ms);
+                if reason == "recovered" {
+                    t.restart_after_ms = now_ms; // its shell, at once
+                }
                 t.pid = None;
                 t.holder = None;
             }
@@ -426,6 +439,7 @@ const PRIVATE: &[&str] = &[
     "restart_after_ms",
     "restart_delay_ms",
     "program_started_ms",
+    "recovering",
 ];
 
 /// A terminal as clients see it (API results, events): its facts, without

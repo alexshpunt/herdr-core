@@ -451,7 +451,10 @@ fn run(cmd: Option<Cmd>, json: bool, asked: bool) -> Result<Option<Out>, RpcErro
             let human = format!("removed {}", r["removed"].as_str().unwrap_or("?"));
             Out { json: r, human }
         }
-        Cmd::Keep(p) => {
+        Cmd::Keep(mut p) => {
+            if p.no_recover {
+                p.recover = Some(Vec::new());
+            }
             let r = call("terminal.keep", to(&p))?;
             let human = describe(&r);
             Out { json: r, human }

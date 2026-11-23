@@ -915,7 +915,7 @@
             ]
           },
           "reason": {
-            "description": "Why its program ended or is pending (`spawn_pending` means its initial\nspawn timed out, but the holder may still be starting it):\nexited, killed, server_stop, host_shutdown (Windows\nis ending the session, including logout), signaled (a kept program\ndied by signal without an exit code), holder_lost (its holder\ndied), stopped_by_restart (nothing ran it any more after a restart).",
+            "description": "Why its program ended or is pending (`spawn_pending` means its initial\nspawn timed out, but the holder may still be starting it):\nexited, killed, server_stop, host_shutdown (Windows\nis ending the session, including logout), signaled (a kept program\ndied by signal without an exit code), recovered (its recovery command\nended; the shell follows), holder_lost (its holder\ndied), stopped_by_restart (nothing ran it any more after a restart).",
             "type": [
               "string",
               "null"
@@ -927,6 +927,16 @@
             },
             "description": "Other 7501 records by id (programs reporting on several things).",
             "type": "object"
+          },
+          "recover": {
+            "description": "Runs once in place of that shell after the next loss, then the shell\n(set with `keep`; opaque to the core). Null once used or forgotten.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "reported": {
             "default": false,
@@ -1396,7 +1406,7 @@
             ]
           },
           "reason": {
-            "description": "Why its program ended or is pending (`spawn_pending` means its initial\nspawn timed out, but the holder may still be starting it):\nexited, killed, server_stop, host_shutdown (Windows\nis ending the session, including logout), signaled (a kept program\ndied by signal without an exit code), holder_lost (its holder\ndied), stopped_by_restart (nothing ran it any more after a restart).",
+            "description": "Why its program ended or is pending (`spawn_pending` means its initial\nspawn timed out, but the holder may still be starting it):\nexited, killed, server_stop, host_shutdown (Windows\nis ending the session, including logout), signaled (a kept program\ndied by signal without an exit code), recovered (its recovery command\nended; the shell follows), holder_lost (its holder\ndied), stopped_by_restart (nothing ran it any more after a restart).",
             "type": [
               "string",
               "null"
@@ -1408,6 +1418,16 @@
             },
             "description": "Other 7501 records by id (programs reporting on several things).",
             "type": "object"
+          },
+          "recover": {
+            "description": "Runs once in place of that shell after the next loss, then the shell\n(set with `keep`; opaque to the core). Null once used or forgotten.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "reported": {
             "default": false,
@@ -2318,7 +2338,7 @@
       }
     },
     {
-      "description": "Set whether a live terminal restarts as a shell after loss, including death by signal without an exit code. Exit with a code and explicit kill close it. Recovery runs on every OS after a grace delay, except while the core stops/restarts or Windows reports session shutdown. Streams end on loss; reattach after restarted.",
+      "description": "Set whether a live terminal restarts as a shell after loss, including death by signal without an exit code. `recover` sets an argv that runs once instead of that shell after the next loss, then the shell; absent leaves it, empty forgets it. Exit with a code and explicit kill close it. Recovery runs on every OS after a grace delay, except while the core stops/restarts or Windows reports session shutdown. Streams end on loss; reattach after restarted.",
       "errors": [
         {
           "code": -32000,
@@ -2352,6 +2372,21 @@
           "schema": {
             "description": "Keep this live terminal after loss. Existing streams end with the loss reason; reattach after `restarted`.",
             "type": "boolean"
+          }
+        },
+        {
+          "description": "After `--`: a command to run once in place of the recovery shell after\nthe next loss; when it ends, however it ends, the shell starts. The core\nnever reads or derives it. Absent leaves it as it is; empty or `--off`\nforgets it.",
+          "name": "recover",
+          "required": false,
+          "schema": {
+            "description": "After `--`: a command to run once in place of the recovery shell after\nthe next loss; when it ends, however it ends, the shell starts. The core\nnever reads or derives it. Absent leaves it as it is; empty or `--off`\nforgets it.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         {
