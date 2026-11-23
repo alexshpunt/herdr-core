@@ -175,8 +175,7 @@ impl Core {
         // A program that asks for focus reports learns where focus is now, not at the next change,
         // unless the same output turned them off again.
         if focus_asked && screen.dec_mode(1004) {
-            let focused = viewers.get(&id).into_iter().flatten().any(|v| v.focused && !v.observe);
-            replies.extend_from_slice(focus_report(focused));
+            replies.extend_from_slice(focus_report(looked_at(viewers.get(&id))));
         }
         if let Some(link) = holder {
             link.input(id, &replies);
@@ -365,7 +364,9 @@ impl Core {
                 id
             })
         };
+        // Focus went to another viewer's window, which may have reported it first: still looked at.
         if let Some(id) = id
+            && (focused || !looked_at(st.viewers.get(&id)))
             && st.screens.get(&id).is_some_and(|s| s.dec_mode(1004))
             && let Some(link) = st.link(id)
         {
@@ -388,7 +389,7 @@ impl Core {
                 !leaves
             });
             if typing_left {
-                touched.push((*id, focus_left && !vs.iter().any(|v| v.focused && !v.observe)));
+                touched.push((*id, focus_left && !looked_at(Some(vs))));
             }
         }
         st.viewers.retain(|_, vs| !vs.is_empty());
@@ -498,6 +499,11 @@ fn ordered_replies(gate: &mut crate::input::Gate, replies: &[u8]) -> Vec<u8> {
 /// What a program with focus reports on (DEC mode 1004) gets for a focus state.
 fn focus_report(focused: bool) -> &'static [u8] {
     if focused { b"\x1b[I" } else { b"\x1b[O" }
+}
+
+/// Whether a typing viewer's window has focus: the program counts as focused.
+fn looked_at(viewers: Option<&Vec<Viewer>>) -> bool {
+    viewers.is_some_and(|vs| vs.iter().any(|v| v.focused && !v.observe))
 }
 
 /// Whether a viewer could answer an image: observers' replies never reach the program.

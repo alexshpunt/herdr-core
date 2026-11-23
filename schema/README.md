@@ -71,10 +71,10 @@ The viewer sends keys as DATA on the same channel, and RESIZE,
 FOCUS and FACTS as it changes. The last active viewer sets the size
 (active: it attached, typed, resized or gained focus); `observe` viewers never type or resize.
 A viewer starts unfocused, so send FOCUS 1 once attached when its window already
-has focus. A program that has focus reports (mode 1004) on gets `CSI I` or `CSI O`
-for each FOCUS, `CSI O` when the last focused typing viewer leaves, and each time it
-turns them on, also when they are on already, the current focus at once: `CSI I` if
-any typing viewer is focused, `CSI O` otherwise.
+has focus. A program counts as focused while any typing viewer is focused. With focus
+reports (mode 1004) on, it gets `CSI I` for each FOCUS 1, `CSI O` when FOCUS 0 or a
+leaving viewer leaves no typing viewer focused, and each time it turns them on, also
+when they are on already, the current focus at once.
 Automatic query answers (including mode 2048 reports, kitty graphics and XTGETTCAP
 replies) use AUTOMATIC_INPUT, not DATA. Their bytes reach the program unchanged,
 including duplicates from multiple viewers, but do not take size/display ownership

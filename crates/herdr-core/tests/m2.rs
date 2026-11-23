@@ -582,14 +582,20 @@ fn a_program_that_turns_on_focus_reports_learns_the_current_focus() {
     wait_until("lost", || got().ends_with(b"\x1b[I\x1b[O"));
     touch(&s, "ask");
     wait_until("asked again", || got() == b"\x1b[O\x1b[I\x1b[I\x1b[O\x1b[O");
-    // Viewers leave: one that never had focus changes nothing; the last focused one, like a closed
-    // Herdr App, leaves nobody looking.
     v.conn.send(v.channel, wire::FOCUS, &[1]);
     wait_until("looked at", || got() == b"\x1b[O\x1b[I\x1b[I\x1b[O\x1b[O\x1b[I");
-    drop(Viewer::attach(&s, &t, 80, 24, json!({})));
+    // Focus moves to another viewer's window, whose report comes first: still looked at.
+    let mut w = Viewer::attach(&s, &t, 80, 24, json!({}));
+    w.conn.send(w.channel, wire::FOCUS, &[1]);
+    wait_until("the other window", || got() == b"\x1b[O\x1b[I\x1b[I\x1b[O\x1b[O\x1b[I\x1b[I");
+    v.conn.send(v.channel, wire::FOCUS, &[0]);
+    // Viewers leave: one without focus changes nothing, as the exact bytes below show; the last
+    // focused one, like a closed Herdr App, leaves nobody looking.
     std::thread::sleep(Duration::from_millis(300));
     drop(v);
-    wait_until("nobody looks", || got() == b"\x1b[O\x1b[I\x1b[I\x1b[O\x1b[O\x1b[I\x1b[O");
+    std::thread::sleep(Duration::from_millis(300));
+    drop(w);
+    wait_until("nobody looks", || got() == b"\x1b[O\x1b[I\x1b[I\x1b[O\x1b[O\x1b[I\x1b[I\x1b[O");
 }
 
 #[test]
