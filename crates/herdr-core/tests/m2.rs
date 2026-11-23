@@ -558,7 +558,8 @@ fn a_program_that_turns_on_focus_reports_learns_the_current_focus() {
         &s,
         &format!(
             "stty raw -echo; dd bs=1 of={} </dev/tty 2>/dev/null & echo ready; \
-             w on; printf '\\033[?1004h'; w off; printf '\\033[?1004l'; echo off; w again; printf '\\033[?1004h'; wait",
+             w on; printf '\\033[?1004h'; w off; printf '\\033[?1004l'; echo off; w again; printf '\\033[?1004h'; \
+             w ask; printf '\\033[?1000;1004h'; wait",
             got.display()
         ),
     );
@@ -575,6 +576,11 @@ fn a_program_that_turns_on_focus_reports_learns_the_current_focus() {
     v.shows("off");
     touch(&s, "again");
     wait_until("focused at once", || got() == b"\x1b[O\x1b[I\x1b[I");
+    // Turning them on again while they are on asks where focus is now, as a late listener does.
+    v.conn.send(v.channel, wire::FOCUS, &[0]);
+    wait_until("lost", || got().ends_with(b"\x1b[I\x1b[O"));
+    touch(&s, "ask");
+    wait_until("asked again", || got() == b"\x1b[O\x1b[I\x1b[I\x1b[O\x1b[O");
 }
 
 #[test]

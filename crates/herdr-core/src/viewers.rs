@@ -160,20 +160,20 @@ impl Core {
         let State { screens, relays, viewers, holders, output_watch, gates, .. } = st;
         let holder = holders.iter().find(|l| Some(&l.instance) == instance.as_ref());
         let Some(screen) = screens.get_mut(&id) else { return };
-        let reported_focus = screen.dec_mode(1004);
         let relay = relays.entry(id).or_default();
         let recovering = viewers.get(&id).into_iter().flatten().any(|v| v.recovering);
         let (out, recovered) =
             if recovering { relay.feed_to_ground(screen, bytes) } else { (relay.feed(screen, bytes), None) };
         let win32_input = relay.win32_input.take();
+        let focus_asked = std::mem::take(&mut relay.focus_asked);
         if let Some(watchers) = output_watch.get_mut(&id).filter(|_| !scrolling) {
             watchers.retain(|w| w.send(out.clone()).is_ok());
         }
         relay.expect_answers(viewers.get_mut(&id).into_iter().flatten().filter(|v| !v.observe).map(|v| &mut v.answers));
         let (replies, wait) = relay.take_replies(screen, answering(viewers.get(&id)));
         let mut replies = ordered_replies(gates.entry(id).or_default(), &replies);
-        // A program that just asked for focus reports learns where focus is now, not at the next change.
-        if !reported_focus && screen.dec_mode(1004) {
+        // A program that asks for focus reports learns where focus is now, not at the next change.
+        if focus_asked {
             let focused = viewers.get(&id).into_iter().flatten().any(|v| v.focused && !v.observe);
             replies.extend_from_slice(focus_report(focused));
         }

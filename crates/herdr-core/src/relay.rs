@@ -33,6 +33,9 @@ pub struct Relay {
     /// The program's latest win32-input-mode request (DEC 9001, ConPTY's ask
     /// for key events), until taken. The screen doesn't keep it.
     pub win32_input: Option<bool>,
+    /// The program asked for focus reports (DEC 1004), even when they were on
+    /// already, and gets the current focus; until taken.
+    pub focus_asked: bool,
     /// An image the screen answered went to viewers, and none has answered yet.
     waiting: bool,
     /// Where, in the screen's pending replies, those after that image begin.
@@ -145,9 +148,10 @@ impl Relay {
                         out.extend_from_slice(&seq); // not answered here: the viewer may
                     }
                 } else {
-                    if let Some(on) = win32_input(&seq) {
+                    if let Some(on) = dec_mode_set(&seq, b"9001") {
                         self.win32_input = Some(on);
                     }
+                    self.focus_asked |= dec_mode_set(&seq, b"1004") == Some(true);
                     if seq == b"\x1b_" {
                         self.apc = Some(screen.pending_responses());
                     }
@@ -258,15 +262,15 @@ fn without_resize_reports(replies: &[u8]) -> Vec<u8> {
     out
 }
 
-/// `CSI ? … 9001 … h` or `l`: whether it turns win32-input-mode on.
-fn win32_input(seq: &[u8]) -> Option<bool> {
+/// `CSI ? … mode … h` or `l`: whether it turns that DEC private mode on.
+fn dec_mode_set(seq: &[u8], mode: &[u8]) -> Option<bool> {
     let (last, params) = seq.strip_prefix(b"\x1b[?")?.split_last()?;
     let on = match last {
         b'h' => true,
         b'l' => false,
         _ => return None,
     };
-    params.split(|b| *b == b';').any(|p| p == b"9001").then_some(on)
+    params.split(|b| *b == b';').any(|p| p == mode).then_some(on)
 }
 
 fn pass(screen: &mut Screen, out: &mut Vec<u8>, bytes: &[u8]) {
