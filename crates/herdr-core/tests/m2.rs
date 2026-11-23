@@ -591,8 +591,17 @@ fn hc_attach_counts_as_focused_when_it_starts() {
     let inner = run(&s, &["sh", "-c", &program]);
     let got = || std::fs::read(&got).unwrap_or_default();
     wait_until("unfocused while nobody looks", || got() == b"\x1b[O");
-    // The client's own window (a terminal nobody focuses) reports focus out only after the client started.
+    // The client's own window, a terminal nobody focuses, answers each request for focus reports
+    // (the client's and the one in the program's first paint) only after the client started.
     let bin = s.bin.display().to_string();
     run(&s, &[&bin, "attach", &inner]);
-    wait_until("focused on start, then the window's report", || got() == b"\x1b[O\x1b[I\x1b[O");
+    wait_until("the window's first report", || got().len() >= 9);
+    std::thread::sleep(Duration::from_millis(300));
+    let got = got();
+    let after = got.get(6..).unwrap_or_default();
+    assert!(
+        got.starts_with(b"\x1b[O\x1b[I") && !after.is_empty() && after.chunks(3).all(|r| r == b"\x1b[O"),
+        "focused on start, then only the window's reports: {:?}",
+        String::from_utf8_lossy(&got)
+    );
 }
