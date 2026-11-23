@@ -38,6 +38,8 @@ pub struct Viewer {
     /// None: not active since it came back after a dropped line.
     active_at: Option<Instant>,
     display: Display,
+    /// Its window has focus: it said so last (viewers start unfocused).
+    focused: bool,
     /// An unfinished sequence exceeded continuation tracking; skip its tail.
     pub(crate) recovering: bool,
     answers: crate::relay::Answers,
@@ -92,6 +94,7 @@ impl Core {
             display: req.display,
             recovering,
             answers: Default::default(),
+            focused: false,
         });
         if !req.observe {
             self.apply_size(&mut st, id);
@@ -162,12 +165,18 @@ impl Core {
         let (out, recovered) =
             if recovering { relay.feed_to_ground(screen, bytes) } else { (relay.feed(screen, bytes), None) };
         let win32_input = relay.win32_input.take();
+        let focus_asked = std::mem::take(&mut relay.focus_asked);
         if let Some(watchers) = output_watch.get_mut(&id).filter(|_| !scrolling) {
             watchers.retain(|w| w.send(out.clone()).is_ok());
         }
         relay.expect_answers(viewers.get_mut(&id).into_iter().flatten().filter(|v| !v.observe).map(|v| &mut v.answers));
         let (replies, wait) = relay.take_replies(screen, answering(viewers.get(&id)));
-        let replies = ordered_replies(gates.entry(id).or_default(), &replies);
+        let mut replies = ordered_replies(gates.entry(id).or_default(), &replies);
+        // A program that asks for focus reports learns where focus is now, not at the next change,
+        // unless the same output turned them off again.
+        if focus_asked && screen.dec_mode(1004) {
+            replies.extend_from_slice(focus_report(looked_at(viewers.get(&id))));
+        }
         if let Some(link) = holder {
             link.input(id, &replies);
         }
@@ -348,15 +357,20 @@ impl Core {
     pub fn viewer_focus(&self, conn: &Arc<Conn>, channel: u32, focused: bool) {
         let mut st = self.lock();
         let id = if focused {
-            self.touch(&mut st, conn, channel, |_| {})
+            self.touch(&mut st, conn, channel, |v| v.focused = true)
         } else {
-            Self::viewer(&mut st, conn, channel).filter(|(_, v)| !v.observe).map(|(id, _)| id)
+            Self::viewer(&mut st, conn, channel).filter(|(_, v)| !v.observe).map(|(id, v)| {
+                v.focused = false;
+                id
+            })
         };
+        // Focus went to another viewer's window, which may have reported it first: still looked at.
         if let Some(id) = id
+            && (focused || !looked_at(st.viewers.get(&id)))
             && st.screens.get(&id).is_some_and(|s| s.dec_mode(1004))
             && let Some(link) = st.link(id)
         {
-            link.input(id, if focused { b"\x1b[I" } else { b"\x1b[O" });
+            link.input(id, focus_report(focused));
         }
     }
 
@@ -367,17 +381,26 @@ impl Core {
         let mut touched = Vec::new();
         for (id, vs) in st.viewers.iter_mut() {
             let mut typing_left = false;
+            let mut focus_left = false;
             vs.retain(|v| {
                 let leaves = Arc::ptr_eq(&v.conn, conn) && channel.is_none_or(|c| c == v.channel);
                 typing_left |= leaves && !v.observe;
+                focus_left |= leaves && !v.observe && v.focused;
                 !leaves
             });
             if typing_left {
-                touched.push(*id);
+                touched.push((*id, focus_left && !looked_at(Some(vs))));
             }
         }
         st.viewers.retain(|_, vs| !vs.is_empty());
-        for id in touched {
+        for (id, blurred) in touched {
+            // The last focused viewer left: nobody looks at the program any more.
+            if blurred
+                && st.screens.get(&id).is_some_and(|s| s.dec_mode(1004))
+                && let Some(link) = st.link(id)
+            {
+                link.input(id, focus_report(false));
+            }
             self.apply_size(&mut st, id);
         }
     }
@@ -471,6 +494,16 @@ fn ordered_replies(gate: &mut crate::input::Gate, replies: &[u8]) -> Vec<u8> {
         }
     }
     now
+}
+
+/// What a program with focus reports on (DEC mode 1004) gets for a focus state.
+fn focus_report(focused: bool) -> &'static [u8] {
+    if focused { b"\x1b[I" } else { b"\x1b[O" }
+}
+
+/// Whether a typing viewer's window has focus: the program counts as focused.
+fn looked_at(viewers: Option<&Vec<Viewer>>) -> bool {
+    viewers.is_some_and(|vs| vs.iter().any(|v| v.focused && !v.observe))
 }
 
 /// Whether a viewer could answer an image: observers' replies never reach the program.
