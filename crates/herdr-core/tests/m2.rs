@@ -558,7 +558,7 @@ fn a_program_that_turns_on_focus_reports_learns_the_current_focus() {
         &s,
         &format!(
             "stty raw -echo; dd bs=1 of={} </dev/tty 2>/dev/null & echo ready; \
-             w on; printf '\\033[?1004h'; w off; printf '\\033[?1004l'; echo off; w again; printf '\\033[?1004h'; \
+             w on; printf '\\033[?1004h'; w off; printf '\\033[?1004h\\033[?1004l'; echo off; w again; printf '\\033[?1004h'; \
              w ask; printf '\\033[?1000;1004h'; wait",
             got.display()
         ),
@@ -572,6 +572,7 @@ fn a_program_that_turns_on_focus_reports_learns_the_current_focus() {
     wait_until("unfocused at once", || got() == b"\x1b[O");
     v.conn.send(v.channel, wire::FOCUS, &[1]);
     wait_until("the change", || got() == b"\x1b[O\x1b[I");
+    // Asked and turned off in one write: nothing, as the exact bytes below show.
     touch(&s, "off");
     v.shows("off");
     touch(&s, "again");

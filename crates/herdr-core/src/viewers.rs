@@ -172,8 +172,9 @@ impl Core {
         relay.expect_answers(viewers.get_mut(&id).into_iter().flatten().filter(|v| !v.observe).map(|v| &mut v.answers));
         let (replies, wait) = relay.take_replies(screen, answering(viewers.get(&id)));
         let mut replies = ordered_replies(gates.entry(id).or_default(), &replies);
-        // A program that asks for focus reports learns where focus is now, not at the next change.
-        if focus_asked {
+        // A program that asks for focus reports learns where focus is now, not at the next change,
+        // unless the same output turned them off again.
+        if focus_asked && screen.dec_mode(1004) {
             let focused = viewers.get(&id).into_iter().flatten().any(|v| v.focused && !v.observe);
             replies.extend_from_slice(focus_report(focused));
         }
