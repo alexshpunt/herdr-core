@@ -549,3 +549,44 @@ fn hc_attach_relays_both_ways_and_detaches_on_ctrl_backslash() {
     assert_eq!(rec["state"], "live");
     wait_until("headless after detach", || size(&s, &inner) == (200, 120));
 }
+
+#[test]
+fn a_program_that_turns_on_focus_reports_learns_the_current_focus() {
+    let s = Session::new();
+    let got = s.root.join("got");
+    let program = script(
+        &s,
+        &format!(
+            "stty raw -echo; dd bs=1 of={} </dev/tty 2>/dev/null & echo ready; \
+             w on; printf '\\033[?1004h'; w off; printf '\\033[?1004l'; echo off; w again; printf '\\033[?1004h'; wait",
+            got.display()
+        ),
+    );
+    let t = run(&s, &["sh", "-c", &program]);
+    let got = || std::fs::read(&got).unwrap_or_default();
+    // Attached but not looked at, like a pane in a background tab.
+    let mut v = Viewer::attach(&s, &t, 80, 24, json!({}));
+    v.shows("ready");
+    touch(&s, "on");
+    wait_until("unfocused at once", || got() == b"\x1b[O");
+    v.conn.send(v.channel, wire::FOCUS, &[1]);
+    wait_until("the change", || got() == b"\x1b[O\x1b[I");
+    touch(&s, "off");
+    v.shows("off");
+    touch(&s, "again");
+    wait_until("focused at once", || got() == b"\x1b[O\x1b[I\x1b[I");
+}
+
+#[test]
+fn hc_attach_counts_as_focused_when_it_starts() {
+    let s = Session::new();
+    let got = s.root.join("got");
+    let program = format!("stty raw -echo; printf '\\033[?1004h'; dd bs=1 of={} 2>/dev/null", got.display());
+    let inner = run(&s, &["sh", "-c", &program]);
+    let got = || std::fs::read(&got).unwrap_or_default();
+    wait_until("unfocused while nobody looks", || got() == b"\x1b[O");
+    // The client's own window (a terminal nobody focuses) reports focus out only after the client started.
+    let bin = s.bin.display().to_string();
+    run(&s, &[&bin, "attach", &inner]);
+    wait_until("focused on start, then the window's report", || got() == b"\x1b[O\x1b[I\x1b[O");
+}

@@ -70,6 +70,10 @@ keys: a viewer that honors 9001 sends key events in that format itself.
 The viewer sends keys as DATA on the same channel, and RESIZE,
 FOCUS and FACTS as it changes. The last active viewer sets the size
 (active: it attached, typed, resized or gained focus); `observe` viewers never type or resize.
+A viewer starts unfocused, so send FOCUS 1 once attached when its window already
+has focus. A program that has focus reports (mode 1004) on gets `CSI I` or `CSI O`
+for each FOCUS, and when it turns them on, the current focus at once: `CSI I` if any
+typing viewer is focused, `CSI O` otherwise.
 Automatic query answers (including mode 2048 reports, kitty graphics and XTGETTCAP
 replies) use AUTOMATIC_INPUT, not DATA. Their bytes reach the program unchanged,
 including duplicates from multiple viewers, but do not take size/display ownership

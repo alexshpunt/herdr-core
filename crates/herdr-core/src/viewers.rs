@@ -38,6 +38,8 @@ pub struct Viewer {
     /// None: not active since it came back after a dropped line.
     active_at: Option<Instant>,
     display: Display,
+    /// Its window has focus: it said so last (viewers start unfocused).
+    focused: bool,
     /// An unfinished sequence exceeded continuation tracking; skip its tail.
     pub(crate) recovering: bool,
     answers: crate::relay::Answers,
@@ -92,6 +94,7 @@ impl Core {
             display: req.display,
             recovering,
             answers: Default::default(),
+            focused: false,
         });
         if !req.observe {
             self.apply_size(&mut st, id);
@@ -157,6 +160,7 @@ impl Core {
         let State { screens, relays, viewers, holders, output_watch, gates, .. } = st;
         let holder = holders.iter().find(|l| Some(&l.instance) == instance.as_ref());
         let Some(screen) = screens.get_mut(&id) else { return };
+        let reported_focus = screen.dec_mode(1004);
         let relay = relays.entry(id).or_default();
         let recovering = viewers.get(&id).into_iter().flatten().any(|v| v.recovering);
         let (out, recovered) =
@@ -167,7 +171,12 @@ impl Core {
         }
         relay.expect_answers(viewers.get_mut(&id).into_iter().flatten().filter(|v| !v.observe).map(|v| &mut v.answers));
         let (replies, wait) = relay.take_replies(screen, answering(viewers.get(&id)));
-        let replies = ordered_replies(gates.entry(id).or_default(), &replies);
+        let mut replies = ordered_replies(gates.entry(id).or_default(), &replies);
+        // A program that just asked for focus reports learns where focus is now, not at the next change.
+        if !reported_focus && screen.dec_mode(1004) {
+            let focused = viewers.get(&id).into_iter().flatten().any(|v| v.focused && !v.observe);
+            replies.extend_from_slice(focus_report(focused));
+        }
         if let Some(link) = holder {
             link.input(id, &replies);
         }
@@ -348,15 +357,18 @@ impl Core {
     pub fn viewer_focus(&self, conn: &Arc<Conn>, channel: u32, focused: bool) {
         let mut st = self.lock();
         let id = if focused {
-            self.touch(&mut st, conn, channel, |_| {})
+            self.touch(&mut st, conn, channel, |v| v.focused = true)
         } else {
-            Self::viewer(&mut st, conn, channel).filter(|(_, v)| !v.observe).map(|(id, _)| id)
+            Self::viewer(&mut st, conn, channel).filter(|(_, v)| !v.observe).map(|(id, v)| {
+                v.focused = false;
+                id
+            })
         };
         if let Some(id) = id
             && st.screens.get(&id).is_some_and(|s| s.dec_mode(1004))
             && let Some(link) = st.link(id)
         {
-            link.input(id, if focused { b"\x1b[I" } else { b"\x1b[O" });
+            link.input(id, focus_report(focused));
         }
     }
 
@@ -471,6 +483,11 @@ fn ordered_replies(gate: &mut crate::input::Gate, replies: &[u8]) -> Vec<u8> {
         }
     }
     now
+}
+
+/// What a program with focus reports on (DEC mode 1004) gets for a focus state.
+fn focus_report(focused: bool) -> &'static [u8] {
+    if focused { b"\x1b[I" } else { b"\x1b[O" }
 }
 
 /// Whether a viewer could answer an image: observers' replies never reach the program.
