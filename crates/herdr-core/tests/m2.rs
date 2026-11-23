@@ -549,3 +549,74 @@ fn hc_attach_relays_both_ways_and_detaches_on_ctrl_backslash() {
     assert_eq!(rec["state"], "live");
     wait_until("headless after detach", || size(&s, &inner) == (200, 120));
 }
+
+#[test]
+fn a_program_that_turns_on_focus_reports_learns_the_current_focus() {
+    let s = Session::new();
+    let got = s.root.join("got");
+    let program = script(
+        &s,
+        &format!(
+            "stty raw -echo; dd bs=1 of={} </dev/tty 2>/dev/null & echo ready; \
+             w on; printf '\\033[?1004h'; w off; printf '\\033[?1004h\\033[?1004l'; echo off; w again; printf '\\033[?1004h'; \
+             w ask; printf '\\033[?1000;1004h'; wait",
+            got.display()
+        ),
+    );
+    let t = run(&s, &["sh", "-c", &program]);
+    let got = || std::fs::read(&got).unwrap_or_default();
+    // Attached but not looked at, like a pane in a background tab.
+    let mut v = Viewer::attach(&s, &t, 80, 24, json!({}));
+    v.shows("ready");
+    touch(&s, "on");
+    wait_until("unfocused at once", || got() == b"\x1b[O");
+    v.conn.send(v.channel, wire::FOCUS, &[1]);
+    wait_until("the change", || got() == b"\x1b[O\x1b[I");
+    // Asked and turned off in one write: nothing, as the exact bytes below show.
+    touch(&s, "off");
+    v.shows("off");
+    touch(&s, "again");
+    wait_until("focused at once", || got() == b"\x1b[O\x1b[I\x1b[I");
+    // Turning them on again while they are on asks where focus is now, as a late listener does.
+    v.conn.send(v.channel, wire::FOCUS, &[0]);
+    wait_until("lost", || got().ends_with(b"\x1b[I\x1b[O"));
+    touch(&s, "ask");
+    wait_until("asked again", || got() == b"\x1b[O\x1b[I\x1b[I\x1b[O\x1b[O");
+    v.conn.send(v.channel, wire::FOCUS, &[1]);
+    wait_until("looked at", || got() == b"\x1b[O\x1b[I\x1b[I\x1b[O\x1b[O\x1b[I");
+    // Focus moves to another viewer's window, whose report comes first: still looked at.
+    let mut w = Viewer::attach(&s, &t, 80, 24, json!({}));
+    w.conn.send(w.channel, wire::FOCUS, &[1]);
+    wait_until("the other window", || got() == b"\x1b[O\x1b[I\x1b[I\x1b[O\x1b[O\x1b[I\x1b[I");
+    v.conn.send(v.channel, wire::FOCUS, &[0]);
+    // Viewers leave: one without focus changes nothing, as the exact bytes below show; the last
+    // focused one, like a closed Herdr App, leaves nobody looking.
+    std::thread::sleep(Duration::from_millis(300));
+    drop(v);
+    std::thread::sleep(Duration::from_millis(300));
+    drop(w);
+    wait_until("nobody looks", || got() == b"\x1b[O\x1b[I\x1b[I\x1b[O\x1b[O\x1b[I\x1b[I\x1b[O");
+}
+
+#[test]
+fn hc_attach_counts_as_focused_when_it_starts() {
+    let s = Session::new();
+    let got = s.root.join("got");
+    let program = format!("stty raw -echo; printf '\\033[?1004h'; dd bs=1 of={} 2>/dev/null", got.display());
+    let inner = run(&s, &["sh", "-c", &program]);
+    let got = || std::fs::read(&got).unwrap_or_default();
+    wait_until("unfocused while nobody looks", || got() == b"\x1b[O");
+    // The client's own window, a terminal nobody focuses, answers each request for focus reports
+    // (the client's and the one in the program's first paint) only after the client started.
+    let bin = s.bin.display().to_string();
+    run(&s, &[&bin, "attach", &inner]);
+    wait_until("the window's first report", || got().len() >= 9);
+    std::thread::sleep(Duration::from_millis(300));
+    let got = got();
+    let after = got.get(6..).unwrap_or_default();
+    assert!(
+        got.starts_with(b"\x1b[O\x1b[I") && !after.is_empty() && after.chunks(3).all(|r| r == b"\x1b[O"),
+        "focused on start, then only the window's reports: {:?}",
+        String::from_utf8_lossy(&got)
+    );
+}
