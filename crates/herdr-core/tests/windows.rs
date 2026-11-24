@@ -883,6 +883,15 @@ fn what_a_shell_runs_is_in_front_until_it_ends() {
 }
 
 #[test]
+fn what_a_nested_shell_runs_is_in_front() {
+    let s = Session::new();
+    let t = s.bg(&["powershell.exe", "-NoProfile", "-Command", "cmd.exe /d /c ping -n 60 127.0.0.1"]);
+    wait_until("ping in front through cmd", || {
+        s.json(&["get", &t])["foreground"]["name"].as_str().is_some_and(|name| name.eq_ignore_ascii_case("ping.exe"))
+    });
+}
+
+#[test]
 fn the_folder_a_shell_moves_to_is_seen_and_a_lost_kept_shell_returns_there() {
     let s = Session::new();
     let dir = s.root.join("moved here");

@@ -69,7 +69,9 @@ hc interrupt review                # stop its current turn, not the process
 In human-readable output, `ls` shows the `where` label or the current folder;
 `get` shows the full current folder. Both fall back to the launch folder when
 it is unknown. JSON keeps `cwd` as the launch folder; `get` also includes the
-current folder in `foreground.cwd`.
+current folder in `foreground.cwd`. On Windows, the foreground follows the
+newest live child through known shells (for example, PowerShell and cmd),
+but does not follow a program into its own helpers.
 
 `read --lines 0` reads only the visible screen. History reads may scroll a
 full-screen app, then restore its view. While its status is `working`,
