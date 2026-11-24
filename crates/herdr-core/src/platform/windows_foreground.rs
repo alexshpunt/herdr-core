@@ -1,6 +1,5 @@
-//! A pseudo console has no foreground process group. What stands in for one:
-//! the newest live program a known shell root started itself. A directly
-//! launched program keeps its place when it starts tools or helper processes.
+//! A pseudo console has no foreground process group. Follow each known shell's
+//! newest live child. Stop at the program it launched, not that program's helpers.
 
 use std::mem::{size_of, zeroed};
 use std::os::windows::io::{FromRawHandle, OwnedHandle};
@@ -20,7 +19,7 @@ struct Proc {
 
 /// The pid in front of terminal `root`, whose job holds everything it started.
 pub(super) fn in_front(job: HANDLE, root: u32) -> u32 {
-    newest_child(root, &unsafe { job_processes(job) }).unwrap_or(root)
+    foreground_process(root, &unsafe { job_processes(job) }).map_or(root, |p| p.pid)
 }
 
 fn is_shell(name: &str) -> bool {
@@ -45,34 +44,31 @@ fn is_shell(name: &str) -> bool {
     )
 }
 
-/// A known shell root's newest child, console hosts aside.
-fn newest_child(root: u32, procs: &[Proc]) -> Option<u32> {
-    if !procs.iter().any(|p| p.pid == root && is_shell(&p.name)) {
-        return None;
+/// The program in front, through known shells but never through other programs.
+fn foreground_process(root: u32, procs: &[Proc]) -> Option<&Proc> {
+    let mut current = procs.iter().find(|p| p.pid == root)?;
+    for _ in 0..procs.len() {
+        if !is_shell(&current.name) {
+            return Some(current);
+        }
+        let host = |name: &str| ["conhost.exe", "OpenConsole.exe"].iter().any(|h| name.eq_ignore_ascii_case(h));
+        let Some(child) = procs
+            .iter()
+            .filter(|p| p.parent == current.pid && p.pid != current.pid && !host(&p.name))
+            .max_by_key(|p| p.started)
+        else {
+            return Some(current);
+        };
+        if child.started < current.started {
+            return None;
+        }
+        current = child;
     }
-    let host = |name: &str| ["conhost.exe", "OpenConsole.exe"].iter().any(|h| name.eq_ignore_ascii_case(h));
-    procs
-        .iter()
-        .filter(|p| p.parent == root && p.pid != root && !host(&p.name))
-        .max_by_key(|p| p.started)
-        .map(|p| p.pid)
+    None
 }
 
-/// Whether an identified reporter is reached by following foreground shell jobs.
 fn reporter_in_front(root: u32, reporter: u32, started: u64, procs: &[Proc]) -> bool {
-    let Some(reporter_proc) = procs.iter().find(|p| p.pid == reporter && p.started == started) else { return false };
-    let mut current = root;
-    for _ in 0..procs.len() {
-        let Some(parent) = procs.iter().find(|p| p.pid == current) else { return false };
-        let Some(child) = newest_child(current, procs).and_then(|id| procs.iter().find(|p| p.pid == id)) else {
-            return current == reporter_proc.pid;
-        };
-        if child.started < parent.started {
-            return false;
-        }
-        current = child.pid;
-    }
-    false
+    foreground_process(root, procs).is_some_and(|p| p.pid == reporter && p.started == started)
 }
 
 /// Checks the reported process against a complete observation of the job.
@@ -155,7 +151,7 @@ mod tests {
     fn the_newest_program_the_shell_started_is_in_front() {
         let p = |pid, parent, started, name: &str| Proc { pid, parent, started, name: name.into() };
         let shell = p(10, 1, 1, "powershell.exe");
-        assert_eq!(newest_child(10, &[p(10, 1, 1, "powershell.exe")]), None, "only the shell: it is in front");
+        assert_eq!(foreground_process(10, &[p(10, 1, 1, "powershell.exe")]).map(|p| p.pid), Some(10));
         let procs = [
             shell,
             p(11, 10, 2, "node.exe"),
@@ -163,7 +159,7 @@ mod tests {
             p(13, 10, 4, "conhost.exe"),
             p(14, 12, 5, "node.exe"), // the agent's own helper
         ];
-        assert_eq!(newest_child(10, &procs), Some(12));
+        assert_eq!(foreground_process(10, &procs).map(|p| p.pid), Some(12));
     }
 
     #[test]
@@ -252,9 +248,13 @@ mod tests {
     #[test]
     fn a_direct_program_keeps_its_place_when_it_starts_a_helper() {
         let p = |pid, parent, name: &str| Proc { pid, parent, started: pid as u64, name: name.into() };
-        assert_eq!(newest_child(10, &[p(10, 1, "node.exe"), p(11, 10, "ping.exe")]), None);
+        assert_eq!(foreground_process(10, &[p(10, 1, "node.exe"), p(11, 10, "ping.exe")]).map(|p| p.pid), Some(10));
         for shell in ["cmd.exe", "PwSh.EXE", "powershell.exe", "nu.exe", "bash", "sh.exe"] {
-            assert_eq!(newest_child(10, &[p(10, 1, shell), p(11, 10, "node.exe")]), Some(11), "{shell}");
+            assert_eq!(
+                foreground_process(10, &[p(10, 1, shell), p(11, 10, "node.exe")]).map(|p| p.pid),
+                Some(11),
+                "{shell}"
+            );
         }
     }
 }

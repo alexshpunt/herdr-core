@@ -1101,8 +1101,7 @@ impl Pty {
         }
     }
 
-    /// No process groups on a pseudo console: a known shell's newest child,
-    /// else the terminal's first process.
+    /// The foreground program, following the newest child of each known shell.
     pub fn foreground(&self) -> i32 {
         super::windows_foreground::in_front(self.job.as_raw_handle() as HANDLE, self.pid) as i32
     }
