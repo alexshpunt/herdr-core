@@ -16,6 +16,7 @@ Usage: hc <command> [options]
 Terminals
   run <cmd|template> [task]   run it and wait like a shell (--bg: don't wait)
   ls                          list live terminals (--all: finished too)
+                              --table prints a table even when piped
   get <t>                     show one terminal
   process <t> --pid <pid>     register or observe a process instance
   attach [t]                  put this terminal on it (ctrl+\ detaches)
@@ -318,6 +319,7 @@ Options:
       --all          Include finished terminals
       --json         JSON output even in a terminal
       --label <K=V>  Only terminals carrying all of these labels (repeatable)
+      --table        Print a table even when output is piped
   -h, --help         Print help
 ```
 
