@@ -37,6 +37,9 @@ pub const PROCESS_IS: u8 = 109;
 #[derive(Serialize, Deserialize)]
 pub struct Hello {
     pub version: u32,
+    /// Send whole tails with their offsets; older cores expect a handover suffix.
+    #[serde(default)]
+    pub tail_offsets: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -101,6 +104,12 @@ pub struct HeldTerminal {
     pub cols: u16,
     pub rows: u16,
     pub exit: Option<Exit>,
+    /// Raw stream position of the first byte in this terminal's `TAIL` frame.
+    #[serde(default)]
+    pub raw_offset: u64,
+    /// Raw stream position up to which the handover snapshot covers output.
+    #[serde(default)]
+    pub saved_offset: u64,
 }
 
 #[derive(Serialize, Deserialize)]
